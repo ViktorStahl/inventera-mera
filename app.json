@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Inventera mera",
+    "slug": "inventera-mera",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "inventeramera",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "se.inventeramera.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Inventera mera använder din position när du väljer Min position för att registrera en observation."
+      }
+    },
+    "android": {
+      "package": "se.inventeramera.app",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      "expo-document-picker",
+      "@maplibre/maplibre-react-native"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
