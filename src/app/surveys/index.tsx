@@ -10,6 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { SurveyListItem } from "@/domain/models";
 import { readJsonFile } from "@/export/files";
@@ -19,10 +20,13 @@ import { Card } from "@/ui/Card";
 import { ConnectionBadge } from "@/ui/ConnectionBadge";
 import { EmptyState } from "@/ui/EmptyState";
 import { Field } from "@/ui/Field";
+import { floatingActionLayout } from "@/ui/floatingActionLayout";
 import { colors, spacing } from "@/ui/theme";
 
 export default function SurveyListScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const floatingAction = floatingActionLayout(insets);
   const [surveys, setSurveys] = useState<SurveyListItem[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -71,7 +75,10 @@ export default function SurveyListScreen() {
         data={surveys}
         keyExtractor={(item) => item.id}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: floatingAction.contentPaddingBottom },
+        ]}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListHeaderComponent={
           <View style={styles.header}>
@@ -100,13 +107,13 @@ export default function SurveyListScreen() {
             onPress={() =>
               router.push({ pathname: "/surveys/[surveyId]", params: { surveyId: item.id } })
             }
-            accessibilityLabel={`${item.title}, ${item.observationCount} observationer`}
+            accessibilityLabel={`${item.title}, ${item.localeCount} lokaler och ${item.observationCount} observationer`}
           >
             <View style={styles.cardRow}>
               <View style={styles.cardText}>
                 <Text style={styles.cardTitle}>{item.title}</Text>
                 <Text style={styles.cardMeta}>
-                  {item.observationCount} {item.observationCount === 1 ? "observation" : "observationer"}
+                  {item.localeCount} {item.localeCount === 1 ? "lokal" : "lokaler"} · {item.observationCount} {item.observationCount === 1 ? "observation" : "observationer"}
                 </Text>
                 <Text style={styles.cardMeta}>
                   {item.region.municipalityName ?? item.region.countyName} · {item.surveyDate}
@@ -131,7 +138,11 @@ export default function SurveyListScreen() {
         accessibilityRole="button"
         accessibilityLabel="Skapa ny inventering"
         onPress={() => router.push("/surveys/new")}
-        style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+        style={({ pressed }) => [
+          styles.fab,
+          { bottom: floatingAction.bottom, right: floatingAction.right },
+          pressed && styles.fabPressed,
+        ]}
       >
         <Text style={styles.fabText}>＋</Text>
       </Pressable>
@@ -150,7 +161,6 @@ const styles = StyleSheet.create({
     maxWidth: 760,
     alignSelf: "center",
     padding: spacing.lg,
-    paddingBottom: 120,
   },
   header: { gap: spacing.lg, marginBottom: spacing.lg },
   separator: { height: spacing.sm },
@@ -162,8 +172,6 @@ const styles = StyleSheet.create({
   footer: { marginTop: spacing.xl },
   fab: {
     position: "absolute",
-    right: spacing.xl,
-    bottom: spacing.xl,
     width: 58,
     height: 58,
     borderRadius: 29,

@@ -10,20 +10,22 @@ Read [DESIGN.md](./DESIGN.md) for the product and architecture contract and
 ## Implemented MVP
 
 - Swedish iOS/Android user interface and responsive browser preview.
-- Create, search, list, and open surveys.
+- Create, search, list, open, edit, and permanently delete surveys with
+  confirmation; deleting a survey also deletes its locales and observations.
 - Bundled, searchable 2026 SCB list of 21 counties and 290 municipalities.
-- Add observations with date/time, per-observation locality, RT90 coordinates,
-  optional GPS capture/accuracy, species, amount/unit, public comment, and
-  additional observers.
+- Add, edit, and delete named locales with date/time, RT90 coordinates, optional
+  GPS capture/accuracy, and note.
+- Add, edit, and delete observations within a locale. Time and coordinate use
+  live locale defaults and can be overridden independently; species, amount/unit,
+  public comment, and additional observers remain observation fields.
 - Transform GPS coordinates locally with Lantmäteriet's national RT90 direct
   projection and verify it against their published control example.
-- Locality defaults from the most recently created observation, with the survey
-  title as the first-observation fallback.
 - Small offline vascular-plant starter taxonomy plus unrestricted free text.
 - SQLite persistence, observation-form draft recovery, and local-only data.
 - MapLibre map markers when a map style is configured, plus an always-available
-  marker-only offline fallback.
-- Exact Swedish Excel interchange columns with conditional `Antal` + `Enhet`.
+  marker-only offline fallback and local species/locale/date filters.
+- Exact Swedish Excel observation interchange columns with conditional `Antal`
+  + `Enhet`, plus Survey and Locales sheets.
 - Lossless per-survey JSON backup and restore.
 
 ## Run in a browser

@@ -28,6 +28,18 @@ export type Survey = {
   updatedAt: string;
 };
 
+export type SurveyLocale = {
+  id: string;
+  surveyId: string;
+  name: string;
+  observedAt: string;
+  timeZone: string;
+  position: Position;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type SpeciesSnapshot = {
   source: "taxonomy" | "free-text";
   enteredName: string;
@@ -48,10 +60,13 @@ export type Position = {
 export type Observation = {
   id: string;
   surveyId: string;
+  localeId: string;
   observedAt: string;
   timeZone: string;
   localityName: string;
   position: Position;
+  timeOverridden: boolean;
+  positionOverridden: boolean;
   species: SpeciesSnapshot;
   amount?: { value: number; unit: string };
   publicComment?: string;
@@ -60,7 +75,9 @@ export type Observation = {
   updatedAt: string;
 };
 
-export type SurveyListItem = Survey & { observationCount: number };
+export type SurveyListItem = Survey & { localeCount: number; observationCount: number };
+
+export type LocaleListItem = SurveyLocale & { observationCount: number };
 
 export type Taxon = {
   id: string;
@@ -80,14 +97,28 @@ export type SurveyDraft = {
   regionFreeText: string;
 };
 
-export type ObservationDraft = {
+export type LocaleDraft = {
+  name: string;
   date: string;
   time: string;
-  localityName: string;
   northing: string;
   easting: string;
   accuracyMeters: string;
   positionSource: Position["source"];
+  latitude?: number;
+  longitude?: number;
+  note: string;
+};
+
+export type ObservationDraft = {
+  date: string;
+  time: string;
+  timeOverridden: boolean;
+  northing: string;
+  easting: string;
+  accuracyMeters: string;
+  positionSource: Position["source"];
+  positionOverridden: boolean;
   latitude?: number;
   longitude?: number;
   speciesQuery: string;
@@ -100,8 +131,9 @@ export type ObservationDraft = {
 
 export type SurveyBackup = {
   format: "inventera-mera-backup";
-  formatVersion: 1;
+  formatVersion: 2;
   exportedAt: string;
   survey: Survey;
+  locales: SurveyLocale[];
   observations: Observation[];
 };

@@ -7,6 +7,7 @@ import type { Region, SurveyDraft } from "@/domain/models";
 import { todayLocal } from "@/domain/time";
 import { hasErrors, validateSurveyDraft, type ValidationErrors } from "@/domain/validation";
 import { RegionPicker } from "@/features/regions/RegionPicker";
+import { dismissToSurvey } from "@/navigation/hierarchy";
 import { createSurvey, loadDraft, saveDraft } from "@/storage/database";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
@@ -81,7 +82,7 @@ export default function NewSurveyScreen() {
         sourceVersion: "2026",
       };
       const survey = await createSurvey(draft, region);
-      router.replace({ pathname: "/surveys/[surveyId]", params: { surveyId: survey.id } });
+      dismissToSurvey(router, survey.id);
     } catch (error) {
       Alert.alert("Inventeringen kunde inte sparas", messageOf(error));
     } finally {

@@ -21,10 +21,34 @@ export default function RootLayout() {
         <Stack.Screen name="surveys/index" options={{ title: "Inventeringar" }} />
         <Stack.Screen name="surveys/new" options={{ title: "Ny inventering", presentation: "modal" }} />
         <Stack.Screen name="surveys/[surveyId]/index" options={{ title: "Inventering" }} />
+        <Stack.Screen
+          name="surveys/[surveyId]/edit"
+          options={{ title: "Redigera inventering", presentation: "modal" }}
+        />
         <Stack.Screen name="surveys/[surveyId]/map" options={{ title: "Karta" }} />
+        <Stack.Screen
+          name="surveys/[surveyId]/locales/new"
+          options={{ title: "Ny lokal", presentation: "modal" }}
+        />
+        <Stack.Screen
+          name="surveys/[surveyId]/locales/[localeId]/index"
+          options={{ title: "Lokal" }}
+        />
+        <Stack.Screen
+          name="surveys/[surveyId]/locales/[localeId]/edit"
+          options={{ title: "Redigera lokal", presentation: "modal" }}
+        />
+        <Stack.Screen
+          name="surveys/[surveyId]/locales/[localeId]/observations/new"
+          options={{ title: "Ny observation", presentation: "modal" }}
+        />
         <Stack.Screen
           name="surveys/[surveyId]/observations/new"
           options={{ title: "Ny observation", presentation: "modal" }}
+        />
+        <Stack.Screen
+          name="surveys/[surveyId]/observations/[observationId]"
+          options={{ title: "Redigera observation", presentation: "modal" }}
         />
       </Stack>
     </DatabaseProvider>

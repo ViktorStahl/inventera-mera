@@ -1,4 +1,4 @@
-import type { ObservationDraft, SurveyDraft } from "./models";
+import type { LocaleDraft, ObservationDraft, SurveyDraft } from "./models";
 import { assertRt90 } from "./coordinates";
 
 export type ValidationErrors<T> = Partial<Record<keyof T | "general", string>>;
@@ -25,7 +25,6 @@ export function validateObservationDraft(
   if (!isValidTime(draft.time)) {
     errors.time = "Ange tid som TT:MM.";
   }
-  if (!draft.localityName.trim()) errors.localityName = "Ange lokalnamn.";
   if (!draft.speciesQuery.trim()) errors.speciesQuery = "Ange artnamn.";
 
   const northing = Number(draft.northing.replace(",", "."));
@@ -42,6 +41,27 @@ export function validateObservationDraft(
       errors.amount = "Antal måste vara noll eller större.";
     }
     if (!draft.unit.trim()) errors.unit = "Enhet krävs när antal anges.";
+  }
+  if (draft.accuracyMeters.trim()) {
+    const accuracy = Number(draft.accuracyMeters.replace(",", "."));
+    if (!Number.isFinite(accuracy) || accuracy < 0) {
+      errors.accuracyMeters = "Noggrannhet måste vara noll eller större.";
+    }
+  }
+  return errors;
+}
+
+export function validateLocaleDraft(draft: LocaleDraft): ValidationErrors<LocaleDraft> {
+  const errors: ValidationErrors<LocaleDraft> = {};
+  if (!draft.name.trim()) errors.name = "Ange ett lokalnamn.";
+  if (!isValidDate(draft.date)) errors.date = "Ange datum som ÅÅÅÅ-MM-DD.";
+  if (!isValidTime(draft.time)) errors.time = "Ange tid som TT:MM.";
+  const northing = Number(draft.northing.replace(",", "."));
+  const easting = Number(draft.easting.replace(",", "."));
+  try {
+    assertRt90({ northing, easting });
+  } catch (error) {
+    errors.northing = error instanceof Error ? error.message : "Ogiltiga koordinater.";
   }
   if (draft.accuracyMeters.trim()) {
     const accuracy = Number(draft.accuracyMeters.replace(",", "."));

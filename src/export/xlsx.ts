@@ -1,6 +1,6 @@
 import { strToU8, zipSync } from "fflate";
 
-import type { Observation, Survey } from "@/domain/models";
+import type { Observation, Survey, SurveyLocale } from "@/domain/models";
 
 type Cell = { value: string | number; kind?: "string" | "number" | "date" };
 
@@ -17,9 +17,16 @@ const REQUIRED_OBSERVATION_HEADERS = [
 
 export function createSurveyWorkbook(
   survey: Survey,
+  locales: SurveyLocale[],
   observations: Observation[],
 ): Uint8Array {
-  const includeAmount = observations.some((observation) => observation.amount);
+  const sortedLocales = [...locales].sort((left, right) =>
+    left.observedAt.localeCompare(right.observedAt),
+  );
+  const sortedObservations = [...observations].sort((left, right) =>
+    left.observedAt.localeCompare(right.observedAt),
+  );
+  const includeAmount = sortedObservations.some((observation) => observation.amount);
   const observationHeaders = includeAmount
     ? [...REQUIRED_OBSERVATION_HEADERS, "Antal", "Enhet"]
     : [...REQUIRED_OBSERVATION_HEADERS];
@@ -43,14 +50,39 @@ export function createSurveyWorkbook(
     [stringCell("Taxonomi"), safeStringCell(survey.taxonomyRef?.name ?? "Ingen")],
     [stringCell("Taxonomiversion"), safeStringCell(survey.taxonomyRef?.version ?? "")],
     [stringCell("Koordinatsystem"), stringCell("RT90 2,5 gon V · nationell direktprojektion (EPSG:3847)")],
+    [stringCell("Antal lokaler"), numberCell(locales.length)],
     [stringCell("Antal observationer"), numberCell(observations.length)],
     [stringCell("Exporterad"), stringCell(new Date().toISOString())],
-    [stringCell("Schemaversion"), numberCell(1)],
+    [stringCell("Schemaversion"), numberCell(2)],
+  ];
+
+  const localeHeaders = [
+    "Lokalnamn",
+    "Ost",
+    "Nord",
+    "Noggrannhet",
+    "Startdatum",
+    "Anteckning",
+    "Antal observationer",
+  ];
+  const localeRows: Cell[][] = [
+    localeHeaders.map(stringCell),
+    ...sortedLocales.map((locale) => [
+      safeStringCell(locale.name),
+      numberCell(locale.position.rt90.easting),
+      numberCell(locale.position.rt90.northing),
+      locale.position.accuracyMeters == null
+        ? stringCell("")
+        : numberCell(locale.position.accuracyMeters),
+      dateCell(localExcelSerial(locale.observedAt)),
+      safeStringCell(locale.note ?? ""),
+      numberCell(sortedObservations.filter((observation) => observation.localeId === locale.id).length),
+    ]),
   ];
 
   const observationRows: Cell[][] = [
     observationHeaders.map(stringCell),
-    ...observations.map((observation) => {
+    ...sortedObservations.map((observation) => {
       const row: Cell[] = [
         safeStringCell(observation.species.preferredName ?? observation.species.enteredName),
         safeStringCell(observation.localityName),
@@ -81,6 +113,7 @@ export function createSurveyWorkbook(
         <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
         <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
         <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+        <Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
         <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
         <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
         <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
@@ -100,17 +133,19 @@ export function createSurveyWorkbook(
       <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Inventera mera</Application></Properties>`),
     "xl/workbook.xml": xml(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
       <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-        <sheets><sheet name="Survey" sheetId="1" r:id="rId1"/><sheet name="Observations" sheetId="2" r:id="rId2"/></sheets>
+        <sheets><sheet name="Survey" sheetId="1" r:id="rId1"/><sheet name="Locales" sheetId="2" r:id="rId2"/><sheet name="Observations" sheetId="3" r:id="rId3"/></sheets>
       </workbook>`),
     "xl/_rels/workbook.xml.rels": xml(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
       <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
         <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
         <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
-        <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+        <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/>
+        <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
       </Relationships>`),
     "xl/styles.xml": xml(stylesXml()),
     "xl/worksheets/sheet1.xml": xml(worksheetXml(surveyRows, 2)),
-    "xl/worksheets/sheet2.xml": xml(worksheetXml(observationRows, observationHeaders.length)),
+    "xl/worksheets/sheet2.xml": xml(worksheetXml(localeRows, localeHeaders.length)),
+    "xl/worksheets/sheet3.xml": xml(worksheetXml(observationRows, observationHeaders.length)),
   };
   return zipSync(files, { level: 6 });
 }

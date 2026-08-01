@@ -1,7 +1,7 @@
 # Inventera mera — product and technical design
 
 Status: MVP implemented; remaining sections describe the production-capable target  
-Last updated: 2026-07-31
+Last updated: 2026-08-01
 
 Platform decision: React Native with Expo for iOS and Android, plus an Expo Web
 browser preview. Native remains the field-production target.
@@ -10,14 +10,16 @@ Android builds are pinned operationally to JDK 17 through the repository's npm
 wrapper. This avoids machine-global JDK upgrades changing the Gradle runtime;
 the current Android Gradle Plugin 8.12 declares JDK 17 as its default.
 
-## Implementation status (MVP, 2026-07-31)
+## Implementation status (MVP, 2026-08-01)
 
 The repository contains a working local-only MVP for the requested core flow:
-survey list/search/create/open, observation creation with draft recovery, SCB
-county/municipality selection, offline starter-taxonomy search with free text,
-RT90 input and device-position conversion, observation list/map, Excel export,
-and JSON backup/restore. Data is persisted in SQLite on native devices and in
-origin-scoped browser storage in the web preview.
+survey list/search/create/open, locale creation, observations within locales,
+draft recovery, SCB county/municipality selection, offline starter-taxonomy
+search with free text, RT90 input and device-position conversion, map filtering,
+Excel export, JSON backup/restore, and offline editing and permanent deletion of
+surveys, locales, and observations. Data is persisted in SQLite on native
+devices and in origin-scoped browser storage in the web preview. Deletion
+cascades through the hierarchy and requires explicit destructive confirmation.
 
 The browser preview shares the core routes and uses localStorage, browser file
 downloads, browser geolocation, and an RT90 coordinate map. It is responsive but
@@ -28,16 +30,17 @@ until an authorised, versioned Dyntaxa distribution source is chosen. The map
 accepts a MapLibre style URL for the selected Lantmäteriet raster product and
 falls back to an offline coordinate plot until the organisation supplies its
 approved processed tile endpoint and attribution. Custom taxonomy import,
-managed map-package downloads, observation editing/deletion, and survey
-archiving are post-MVP items described below, not claims about the current app.
+managed map-package downloads, observation duplication, and reversible survey
+archiving remain post-MVP items described below, not claims about the current app.
 
 ## 1. Product summary
 
 Inventera mera is a React Native mobile application, built with Expo and
 TypeScript, for recording wild-plant observations in the field. A user creates
-a survey for a region, chooses a downloaded or custom taxonomy, records
-observations with time and RT90 coordinates, reviews them in a list or on a map,
-and exports the survey to an Excel workbook. The supported production targets
+a survey for a region, chooses a downloaded or custom taxonomy, creates named
+locales with a time and RT90 coordinate, records observations within those
+locales, reviews them in a list or on a map, and exports the survey to an Excel
+workbook. The supported production targets
 are iOS and Android phones.
 
 The field workflow is offline-first. Once the app and the selected taxonomy
@@ -61,7 +64,8 @@ independent of platform views where practical.
 ### Goals
 
 - List, search, create, open, edit, and archive surveys.
-- Add, edit, duplicate, and delete observations within a survey.
+- Add, edit, and delete locales within a survey.
+- Add, edit, duplicate, and delete observations within a locale.
 - Capture the current time and device position with minimal taps.
 - Enter coordinates manually in RT90 2.5 gon V.
 - Search a downloaded Dyntaxa taxonomy, initially vascular plants
@@ -96,10 +100,23 @@ independent of platform views where practical.
   selectable for now. Rank and status remain visible so users can judge the
   suggestion.
 - The MVP basemap uses Lantmäteriet's downloadable raster topographic map.
-- `Lokalnamn` belongs to each observation. A new observation defaults it from
-  the most recently created observation in the same survey, with the survey
-  title as the first-observation fallback; the user may always change it.
+- The field hierarchy is Survey → Locale → Observation. A locale has a required
+  name, time, and coordinate plus an optional note.
+- `Lokalnamn` is the locale's current name. Observations refer to a locale and
+  cannot rename it independently.
+- An observation uses its locale's time and coordinate by default. The user can
+  override either value independently or return it to live inheritance. Editing
+  an inherited locale value therefore updates all non-overridden observations.
 - Excel uses the Swedish interchange columns defined in section 11.
+- The local-only MVP allows permanent survey deletion after explicit
+  confirmation. It deletes the survey, its locales, their observations, and
+  associated drafts in one local operation. Locale deletion similarly cascades
+  to its observations. Reversible archiving remains a later feature.
+- SQLite schema v2 migrates saved v1 observations by grouping exact locality
+  names per survey into locales. The earliest-created observation supplies each
+  locale's defaults and differing later values become explicit overrides.
+  Existing v1 form drafts are deliberately deleted rather than recovered,
+  because their shape is incompatible with the locale workflow.
 
 ## 3. Primary user and core journeys
 
@@ -117,18 +134,18 @@ drafts over dense desktop controls.
 5. See an explicit `Ready offline` status for the app, taxonomy, survey, and
    optional map package.
 
-### 3.2 Record an observation
+### 3.2 Create a locale and record an observation
 
-1. Open a survey and tap the add button.
-2. The form defaults to the current local date and time.
-3. Tap `My location`; the app obtains WGS84 device coordinates, shows the
+1. Open a survey, add a locale, and enter its name, time, and coordinate.
+2. Open the locale and add an observation. Its time and coordinate initially
+   follow the locale.
+3. If needed, override time and/or coordinate. Tap `My location`; the app obtains WGS84 device coordinates, shows the
    reported accuracy, and transforms them locally to RT90.
-4. Confirm or change the prefilled locality name.
-5. Search downloaded species names, select a suggestion, or add the typed name
+4. Search downloaded species names, select a suggestion, or add the typed name
    as free text.
-6. Optionally enter amount with unit, a public comment, and additional
+5. Optionally enter amount with unit, a public comment, and additional
    observers, then save.
-7. The observation appears immediately in the list and map with a `Saved on
+6. The observation appears immediately in the locale list and survey map with a `Saved on
    this device` confirmation.
 
 ### 3.3 Review and export
@@ -144,9 +161,12 @@ drafts over dense desktop controls.
 | --- | --- | --- |
 | `/surveys` | Survey list | Search and open surveys; show count and date |
 | `/surveys/new` | Create survey | Define title, description, region, taxonomy |
-| `/surveys/:surveyId` | Survey detail | Observation list and survey summary |
-| `/surveys/:surveyId/map` | Survey map | Map, markers, selected-observation card |
-| `/surveys/:surveyId/observations/new` | Add observation | Capture all observation fields |
+| `/surveys/:surveyId` | Survey detail | Locale list and survey summary |
+| `/surveys/:surveyId/locales/new` | Add locale | Capture locale name, time, coordinate, and note |
+| `/surveys/:surveyId/locales/:localeId` | Locale detail | Observation list and locale summary |
+| `/surveys/:surveyId/locales/:localeId/edit` | Edit locale | Change or delete a locale |
+| `/surveys/:surveyId/locales/:localeId/observations/new` | Add observation | Capture observation fields and overrides |
+| `/surveys/:surveyId/map` | Survey map | Filter by locale/species/date and view markers |
 | `/surveys/:surveyId/observations/:observationId` | Observation detail/edit | Review and change an observation |
 | `/species/select` | Species picker | Search the active taxonomy or use free text |
 | `/taxonomies` | Offline taxonomies | Download, import, update, and remove packages |
@@ -157,6 +177,13 @@ useful. Unsaved form state must survive an application background/termination
 or a round-trip to the species picker. Restore the draft and ask before
 discarding it.
 
+Navigation history follows the domain hierarchy: survey list → survey → locale
+→ observation. After create, edit, or delete actions, dismiss back to the
+closest existing canonical parent/detail route instead of pushing or replacing
+it with a duplicate. Consequently, Back from a locale goes to its survey and
+Back from an observation result goes from locale to survey without revisiting
+the locale twice.
+
 ## 5. Screen design
 
 ### 5.1 Survey list
@@ -164,7 +191,7 @@ discarding it.
 - Sticky app bar with app title and connection/offline-readiness status.
 - Search by survey title, description, or region, case- and accent-insensitive.
 - Default order: most recently updated first; allow title and survey-date sort.
-- Each card shows title, observation count, survey date, region, and a chevron.
+- Each card shows title, locale and observation counts, survey date, region, and a chevron.
 - Empty state explains how to create the first survey; no-results state keeps
   the search visible.
 - Floating add button opens the create-survey screen and has an accessible
@@ -188,22 +215,32 @@ discarding it.
 
 - App bar contains back, survey title, and an overflow menu.
 - Summary shows survey date, taxonomy name/version, region, and offline status.
-- Tabs are `Observations (n)` and `Map`; they remain reachable with screen
+- Tabs are `Locales (n)` and `Map`; they remain reachable with screen
   readers and preserve scroll/viewport state when switching.
-- Each observation row shows local time, locality, preferred/common name,
-  scientific name when available, amount, and a free-text badge when relevant.
-- The menu contains edit survey, export Excel, backup survey, and archive.
-- Archive is reversible. Permanent deletion requires a second explicit action.
+- Each locale row shows name, date/time, and observation count. Opening a locale
+  shows its observations with time, preferred/common name, scientific name,
+  amount, and an indication when time or coordinate overrides the locale.
+- The MVP shows edit, export, backup, and permanent deletion as visible actions
+  below the locale list so they remain discoverable on compact phones. A
+  later menu may consolidate these actions when archiving is added.
+- Archive is reversible. Permanent deletion requires a second explicit action
+  and clearly states that all locales and observations will also be deleted.
 
-### 5.4 Add/edit observation
+### 5.4 Add/edit locale
+
+Fields are required locale name, local date/time, and RT90 coordinate, with
+optional accuracy and note. Device GPS can populate both canonical WGS84 and
+derived RT90 values. Editing a locale immediately changes its inherited name,
+time, or position on dependent observations. Deleting a locale requires
+confirmation and deletes all observations in it.
+
+### 5.5 Add/edit observation
 
 Fields, in order:
 
-1. Local date and time, required; default now.
-2. Locality name (`Lokalnamn`), required. For a new observation, default to the
-   most recently created observation's locality in this survey; for the first
-   observation, default to the survey title. The value remains freely editable.
-3. Coordinates in `RT90 2.5 gon V (EPSG:3021)`, required:
+1. Local date and time, required; live-inherited from the locale unless overridden.
+2. Read-only locale name (`Lokalnamn`), required through the locale relation.
+3. Coordinates in `RT90 2.5 gon V` using the EPSG:3847 direct-projection emulation, required and live-inherited unless overridden:
    `Northing (X)` and `Easting (Y)`, both in metres.
 4. Location accuracy in metres, read-only when supplied by device GPS.
 5. Species, required, either a selected taxon or free text.
@@ -215,14 +252,12 @@ Fields, in order:
 8. Additional observers (`Med-observatör`), optional repeatable names. Trim
    names, preserve spelling and ordering, and prevent empty entries.
 
-Defaulting runs only when creating a genuinely new blank form. A restored draft
-always wins, and later changes to another observation never rewrite an open
-draft. "Most recently created" means the observation with the latest
-`createdAt` in the survey, not the latest biological `observedAt`, which may be
-backdated.
+Defaulting runs only when creating a genuinely new blank form. A restored v2
+draft always wins. `Use locale time` and `Use locale position` clear their
+respective override instead of copying a new snapshot.
 
-Quick actions set the current time, acquire the current location, or clear the
-coordinate fields. Location capture must show `locating`, `success with
+Quick actions set the current time, restore locale time/position, or acquire
+the current location. Location capture must show `locating`, `success with
 accuracy`, `permission denied`, `unavailable`, and `timed out` states. Saving
 is possible after manual coordinate entry even if geolocation fails.
 
@@ -230,7 +265,7 @@ Validate on blur and save. Preserve all entered values after validation errors.
 The save button remains reachable above the mobile keyboard. A destructive
 delete action is only shown when editing an existing observation.
 
-### 5.5 Species picker
+### 5.6 Species picker
 
 - Search matches preferred Swedish name, scientific name, synonyms, and the
   imported custom aliases, case- and accent-insensitively.
@@ -245,7 +280,7 @@ delete action is only shown when editing an existing observation.
   when taxonomy matches exist. Trim outside whitespace but preserve spelling,
   capitalization, accents, and internal whitespace in the saved snapshot.
 
-### 5.6 Map
+### 5.7 Map
 
 - Render markers from canonical WGS84 longitude/latitude values.
 - Fit all markers on first open, with a sensible maximum zoom; retain the last
@@ -260,8 +295,11 @@ delete action is only shown when editing an existing observation.
   message `Basemap unavailable offline` rather than an error or blank screen.
 - The layer control shows map source, package date/extent, attribution, and
   whether the current viewport is available offline.
+- Filters support one or more locales, one or more species, and an optional
+  exact date. Selections within a category use OR; categories combine with AND.
+  The filtering itself is local and remains available without reception.
 
-### 5.7 Offline and storage feedback
+### 5.8 Offline and storage feedback
 
 The global connection indicator distinguishes:
 
@@ -314,21 +352,49 @@ type Survey = {
 The taxonomy reference is a snapshot. Removing a taxonomy package does not
 remove the name/version from an existing survey or damage its observations.
 
-### 6.2 Observation
+```ts
+type Position = {
+  wgs84: { latitude: number; longitude: number };
+  rt90: { northing: number; easting: number; crs: "EPSG:3847" };
+  accuracyMeters?: number;
+  source: "device" | "manual-rt90" | "map";
+};
+```
+
+### 6.2 Locale
+
+```ts
+type SurveyLocale = {
+  id: string;
+  surveyId: string;
+  name: string;
+  observedAt: string;
+  timeZone: string;
+  position: Position;
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+```
+
+Locale names are required but are not required to be unique within a survey;
+the UUID is identity. Coordinates use the same dual WGS84/RT90 representation
+and canonical-input rules as observation coordinate overrides.
+
+### 6.3 Observation
 
 ```ts
 type Observation = {
   id: string;
   surveyId: string;
-  observedAt: string; // instant with numeric offset, e.g. 2026-07-31T10:14:00+02:00
-  timeZone: string; // IANA zone, e.g. Europe/Stockholm
+  localeId: string;
+  // Effective values returned by the repository after live inheritance:
+  observedAt: string;
+  timeZone: string;
   localityName: string;
-  position: {
-    wgs84: { latitude: number; longitude: number };
-    rt90: { northing: number; easting: number; crs: "EPSG:3847" };
-    accuracyMeters?: number;
-    source: "device" | "manual-rt90" | "map";
-  };
+  position: Position;
+  timeOverridden: boolean;
+  positionOverridden: boolean;
   species: {
     source: "taxonomy" | "free-text";
     enteredName: string;
@@ -352,13 +418,16 @@ rendering fast. For device capture, WGS84 is canonical and RT90 is derived. For
 manual RT90 entry, RT90 is canonical input and WGS84 is derived. Edits recompute
 the other representation in the same transaction.
 
+SQLite stores nullable time and position override columns. Repository reads
+join the owning locale and return the effective values above. `localityName`
+is always resolved from the locale's current name and is also materialized into
+exports/backups for readability; it is not independently editable.
+
 `amount` is absent as a whole or contains both a value and a non-blank unit; a
 partially populated amount is invalid. Additional observers are observation
-level data because field companions may change during a survey. `localityName`
-is trimmed, required, stored as an observation snapshot, and is never derived
-again after the observation is saved.
+level data because field companions may change during a survey.
 
-### 6.3 Taxonomy package
+### 6.4 Taxonomy package
 
 ```ts
 type TaxonomyPackage = {
@@ -388,7 +457,7 @@ type TaxonSearchEntry = {
 };
 ```
 
-### 6.4 Local operation metadata
+### 6.5 Local operation metadata
 
 Records should include a monotonic local revision and tombstones for deleted
 records so a later sync feature can be added without changing field-data
@@ -506,7 +575,7 @@ document intentionally does not pin versions.
 | Data | Storage | Strategy |
 | --- | --- | --- |
 | Application code/static assets | Native application bundle | Versioned release or controlled Expo Update |
-| Surveys/observations/drafts | Application SQLite database | Local source of truth, transactions, backed up |
+| Surveys/locales/observations/drafts | Application SQLite database | Local source of truth, transactions, backed up |
 | Taxonomy metadata | Application SQLite database | Active-version pointer and provenance |
 | Taxonomy packages | Application document directory as SQLite files | Staged, checksum verified, atomically activated |
 | Map regions | MapLibre Native offline storage | User initiated, bounded, provider-authorized |
@@ -545,6 +614,10 @@ user confirmation before removing downloaded data.
   Excel is an interchange/report format, not a lossless application backup.
 - Keep the app usable if an application update, taxonomy update, or map download
   fails; report the failed optional operation separately.
+- The schema v1 → v2 migration preserves saved observations by creating locales
+  as described in Confirmed product decisions. It clears all v1 drafts. This is
+  an intentional one-time exception to draft recovery, approved because the old
+  form has no locale identity or independent override semantics.
 
 ## 10. Map-source strategy
 
@@ -615,9 +688,17 @@ or document directory, without uploading data. The workbook contains:
 | Region | County and optional municipality/free-text area, with SCB codes |
 | Survey date | ISO date |
 | Taxonomy | Name, source, and version |
+| Locale count | Integer |
 | Observation count | Integer |
 | Exported at | ISO timestamp with offset |
 | Application/schema version | Version identifiers |
+
+### Sheet `Locales`
+
+One row per locale with `Lokalnamn`, `Ost`, `Nord`, `Noggrannhet`,
+`Startdatum`, `Anteckning`, and `Antal observationer`. This is contextual app
+data; the mandatory external observation interchange contract remains on the
+next sheet.
 
 ### Sheet `Observations`
 
@@ -627,7 +708,7 @@ are mandatory and exact:
 | Column | Mapping |
 | --- | --- |
 | `Artnamn` | Preferred-name snapshot when available; otherwise the exact free-text/entered name |
-| `Lokalnamn` | Observation locality name |
+| `Lokalnamn` | Current name of the observation's owning locale |
 | `Ost` | RT90 easting (Y), numeric metres |
 | `Nord` | RT90 northing (X), numeric metres |
 | `Noggrannhet` | Location accuracy in metres; blank when unknown |
@@ -711,9 +792,9 @@ explicit backups.
 
 ### Unit and property tests
 
-- Survey/observation validation and migrations.
-- Locality defaulting: restored draft, previous observation, and first-observation
-  survey-title fallback.
+- Survey/locale/observation validation and migrations.
+- Locale live inheritance, independent time/position overrides, restored v2
+  drafts, and clearing incompatible v1 drafts.
 - Coordinate control points, bounds, axis order, and round trips.
 - Taxonomy normalization/ranking and CSV import validation.
 - File-name/cell sanitization and workbook column mapping.
@@ -728,12 +809,13 @@ explicit backups.
 
 ### End-to-end tests
 
-1. Install the release-like build, go offline, create a survey, add a GPS/manual
-   observation, terminate/relaunch the app, and verify persistence.
+1. Install the release-like build, go offline, create a survey and locale, add a
+   GPS/manual observation, terminate/relaunch the app, and verify persistence.
 2. Download a taxonomy, go offline, find by Swedish/scientific/synonym name, and
    save; also save unmatched free text.
 3. Interrupt taxonomy/map download and verify existing data still works.
-4. Create observations, view/select all markers offline, edit one, and export.
+4. Create locales and observations, filter markers by locale/species offline,
+   edit inherited and overridden values, and export.
 5. Upgrade from the previous SQLite schema with data intact.
 6. Run critical flows on the smallest supported phone, with dynamic type,
    external keyboard where applicable, and VoiceOver/TalkBack audits.
@@ -750,9 +832,10 @@ treat simulator or Expo Go results as release verification.
 - Signed Expo development builds install on iOS and Android test devices and
   launch in airplane mode without Metro or a prior online application launch.
 - User can create/open/archive surveys and search the list.
-- User can add/edit/delete observations with locality name, manual RT90
-  coordinates, free-text species, optional amount/unit, public comment,
-  additional observers, and draft recovery.
+- User can add/edit/delete locales with name, time, coordinate, and note.
+- User can add/edit/delete observations with inherited or overridden time and
+  coordinate, free-text species, optional amount/unit, public comment,
+  additional observers, and v2 draft recovery.
 - Records survive process termination and application restart.
 
 ### Phase 2 — location and taxonomy
@@ -769,7 +852,7 @@ treat simulator or Expo Go results as release verification.
 - Lantmäteriet raster map regions can be downloaded, rendered, and removed on
   supported devices under the approved source terms; markers still work when
   no package covers the viewport.
-- Export produces the documented two-sheet `.xlsx` fully offline.
+- Export produces the documented three-sheet `.xlsx` fully offline.
 - Required map/taxonomy attribution and provenance are visible.
 
 ### Phase 4 — production hardening

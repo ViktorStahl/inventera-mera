@@ -1,14 +1,15 @@
-import type { ObservationDraft } from "../models";
-import { parseAdditionalObservers, validateObservationDraft } from "../validation";
+import type { LocaleDraft, ObservationDraft } from "../models";
+import { parseAdditionalObservers, validateLocaleDraft, validateObservationDraft } from "../validation";
 
 const validDraft: ObservationDraft = {
   date: "2026-07-31",
   time: "10:14",
-  localityName: "Lillåsen",
+  timeOverridden: false,
   northing: "6400000",
   easting: "1300000",
   accuracyMeters: "4.5",
   positionSource: "manual-rt90",
+  positionOverridden: false,
   speciesQuery: "Ängsvädd",
   amount: "",
   unit: "",
@@ -44,5 +45,24 @@ describe("observation validation", () => {
       "Carl von Linné",
       "Eva",
     ]);
+  });
+});
+
+describe("locale validation", () => {
+  const locale: LocaleDraft = {
+    name: "Lillåsen",
+    date: "2026-07-31",
+    time: "10:14",
+    northing: "6400000",
+    easting: "1300000",
+    accuracyMeters: "",
+    positionSource: "manual-rt90",
+    note: "",
+  };
+
+  it("requires a name and valid RT90 coordinate", () => {
+    const errors = validateLocaleDraft({ ...locale, name: "", northing: "12" });
+    expect(errors.name).toBeDefined();
+    expect(errors.northing).toBeDefined();
   });
 });

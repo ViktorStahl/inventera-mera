@@ -30,10 +30,10 @@ behaviour, architecture, and acceptance criteria.
 - Preserve the Swedish Excel interchange contract in `DESIGN.md`. In
   particular, never export `Antal` without `Enhet`, and keep the mandatory
   column names exact.
-- Treat `Lokalnamn` as required observation data. For a new observation, use
-  the most recently created observation's value as the default, falling back to
-  the survey title only when the survey has no observations; never overwrite a
-  restored draft or a user's edit.
+- Preserve the Survey → Locale → Observation hierarchy. `Lokalnamn` is the
+  required owning locale's current name. Observations live-inherit locale time
+  and position unless the respective value is explicitly overridden; never
+  overwrite a restored v2 draft or an explicit override.
 - Do not put Dyntaxa subscription credentials in the mobile client. Generate
   downloadable taxonomy packages outside the client.
 - Do not implement offline map downloads from `tile.openstreetmap.org`; its
