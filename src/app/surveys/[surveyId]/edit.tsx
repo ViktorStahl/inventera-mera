@@ -1,11 +1,13 @@
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, View } from "react-native";
 
 import { findRegion, type RegionOption } from "@/data/regions";
+import { VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
 import type { Region, SurveyDraft } from "@/domain/models";
 import { hasErrors, validateSurveyDraft, type ValidationErrors } from "@/domain/validation";
 import { RegionPicker } from "@/features/regions/RegionPicker";
+import { TaxonomySpeciesListFields } from "@/features/taxonomy/TaxonomySpeciesListFields";
 import { dismissToSurvey } from "@/navigation/hierarchy";
 import {
   getSurvey,
@@ -15,7 +17,6 @@ import {
   updateSurvey,
 } from "@/storage/database";
 import { Button } from "@/ui/Button";
-import { Card } from "@/ui/Card";
 import { Field } from "@/ui/Field";
 import { Screen } from "@/ui/Screen";
 import { colors, spacing } from "@/ui/theme";
@@ -31,19 +32,20 @@ export default function EditSurveyScreen() {
 
   useEffect(() => {
     if (!surveyId) return;
-    Promise.all([getSurvey(surveyId), loadDraft<SurveyDraft>(surveyEditDraftKey(surveyId))])
+    Promise.all([getSurvey(surveyId), loadDraft<Partial<SurveyDraft>>(surveyEditDraftKey(surveyId))])
       .then(([survey, stored]) => {
         if (!survey) throw new Error("Inventeringen kunde inte hittas.");
-        const initial =
-          stored ??
-          ({
+        const persisted = {
             title: survey.title,
             description: survey.description ?? "",
             surveyDate: survey.surveyDate,
             countyCode: survey.region.countyCode,
             municipalityCode: survey.region.municipalityCode ?? "",
             regionFreeText: survey.region.freeText ?? "",
-          } satisfies SurveyDraft);
+            taxonomyPackageId: survey.taxonomyRef?.packageId ?? VASCULAR_PLANTS_TAXONOMY.packageId,
+            speciesListId: survey.speciesListId ?? "",
+          } satisfies SurveyDraft;
+        const initial = { ...persisted, ...stored };
         setDraft(initial);
         setSelectedRegion(findRegion(initial.countyCode, initial.municipalityCode || undefined));
       })
@@ -150,13 +152,13 @@ export default function EditSurveyScreen() {
         onChangeText={(value) => update("regionFreeText", value)}
         placeholder="Till exempel Lillåsen, norra delen"
       />
-      <Card>
-        <Text style={styles.cardTitle}>Taxonomi</Text>
-        <Text style={styles.cardValue}>Kärlväxter – offline-startlista</Text>
-        <Text style={styles.cardBody}>
-          Taxonomireferensen behålls när inventeringen redigeras.
-        </Text>
-      </Card>
+      <TaxonomySpeciesListFields
+        taxonomyPackageId={draft.taxonomyPackageId}
+        speciesListId={draft.speciesListId}
+        onTaxonomyChange={(value) => update("taxonomyPackageId", value)}
+        onSpeciesListChange={(value) => update("speciesListId", value)}
+        taxonomyError={errors.taxonomyPackageId}
+      />
       <View style={styles.actions}>
         <Button
           label="Spara ändringar"
@@ -176,8 +178,5 @@ function messageOf(error: unknown): string {
 
 const styles = StyleSheet.create({
   center: { alignItems: "center", justifyContent: "center" },
-  cardTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
-  cardValue: { color: colors.green800, fontSize: 16, marginTop: spacing.xs },
-  cardBody: { color: colors.textMuted, lineHeight: 20, marginTop: spacing.sm },
   actions: { gap: spacing.sm },
 });

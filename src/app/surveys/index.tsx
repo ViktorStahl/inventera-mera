@@ -1,5 +1,5 @@
 import * as DocumentPicker from "expo-document-picker";
-import { Stack, useFocusEffect, useRouter } from "expo-router";
+import { Stack, useFocusEffect, useRouter, type Href } from "expo-router";
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -126,6 +126,16 @@ export default function SurveyListScreen() {
         ListFooterComponent={
           <View style={styles.footer}>
             <Button
+              label="Hantera artlistor"
+              variant="secondary"
+              onPress={() => router.push("/species-lists" as Href)}
+            />
+            <Button
+              label="Inställningar"
+              variant="secondary"
+              onPress={() => router.push("/settings" as Href)}
+            />
+            <Button
               label="Återställ JSON-backup"
               variant="secondary"
               loading={restoring}
@@ -169,7 +179,7 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 18, fontWeight: "700", color: colors.text },
   cardMeta: { marginTop: spacing.xs, color: colors.textMuted },
   chevron: { fontSize: 34, color: colors.textMuted },
-  footer: { marginTop: spacing.xl },
+  footer: { marginTop: spacing.xl, gap: spacing.sm },
   fab: {
     position: "absolute",
     width: 58,

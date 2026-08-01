@@ -1,4 +1,4 @@
-import type { ImperativeRouter } from "expo-router";
+import type { Href, ImperativeRouter } from "expo-router";
 
 type HierarchyRouter = Pick<ImperativeRouter, "dismissTo">;
 
@@ -19,4 +19,12 @@ export function dismissToLocale(
     pathname: "/surveys/[surveyId]/locales/[localeId]",
     params: { surveyId, localeId },
   });
+}
+
+export function dismissToSpeciesLists(router: HierarchyRouter): void {
+  router.dismissTo("/species-lists" as Href);
+}
+
+export function dismissToSpeciesList(router: HierarchyRouter, listId: string): void {
+  router.dismissTo({ pathname: "/species-lists/[listId]", params: { listId } } as unknown as Href);
 }

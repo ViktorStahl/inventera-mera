@@ -12,6 +12,7 @@ export function validateSurveyDraft(
     errors.surveyDate = "Ange datum som ÅÅÅÅ-MM-DD.";
   }
   if (!draft.countyCode) errors.countyCode = "Välj ett län eller en kommun.";
+  if (!draft.taxonomyPackageId) errors.taxonomyPackageId = "Välj en taxonomi.";
   return errors;
 }
 

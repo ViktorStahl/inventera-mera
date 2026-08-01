@@ -1,6 +1,6 @@
 import { strToU8, zipSync } from "fflate";
 
-import type { Observation, Survey, SurveyLocale } from "@/domain/models";
+import type { Observation, SpeciesList, Survey, SurveyLocale } from "@/domain/models";
 
 type Cell = { value: string | number; kind?: "string" | "number" | "date" };
 
@@ -19,6 +19,7 @@ export function createSurveyWorkbook(
   survey: Survey,
   locales: SurveyLocale[],
   observations: Observation[],
+  speciesList?: SpeciesList,
 ): Uint8Array {
   const sortedLocales = [...locales].sort((left, right) =>
     left.observedAt.localeCompare(right.observedAt),
@@ -49,11 +50,12 @@ export function createSurveyWorkbook(
     [stringCell("Inventeringsdatum"), stringCell(survey.surveyDate)],
     [stringCell("Taxonomi"), safeStringCell(survey.taxonomyRef?.name ?? "Ingen")],
     [stringCell("Taxonomiversion"), safeStringCell(survey.taxonomyRef?.version ?? "")],
+    [stringCell("Artlista"), safeStringCell(speciesList?.name ?? "Ingen")],
     [stringCell("Koordinatsystem"), stringCell("RT90 2,5 gon V · nationell direktprojektion (EPSG:3847)")],
     [stringCell("Antal lokaler"), numberCell(locales.length)],
     [stringCell("Antal observationer"), numberCell(observations.length)],
     [stringCell("Exporterad"), stringCell(new Date().toISOString())],
-    [stringCell("Schemaversion"), numberCell(2)],
+    [stringCell("Schemaversion"), numberCell(3)],
   ];
 
   const localeHeaders = [

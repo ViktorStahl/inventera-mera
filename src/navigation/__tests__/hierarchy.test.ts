@@ -1,6 +1,12 @@
 import type { ImperativeRouter } from "expo-router";
 
-import { dismissToLocale, dismissToSurvey, dismissToSurveyList } from "../hierarchy";
+import {
+  dismissToLocale,
+  dismissToSpeciesList,
+  dismissToSpeciesLists,
+  dismissToSurvey,
+  dismissToSurveyList,
+} from "../hierarchy";
 
 describe("hierarchical navigation", () => {
   const dismissTo = jest.fn();
@@ -26,6 +32,17 @@ describe("hierarchical navigation", () => {
     expect(dismissTo).toHaveBeenCalledWith({
       pathname: "/surveys/[surveyId]/locales/[localeId]",
       params: { surveyId: "survey-1", localeId: "locale-1" },
+    });
+  });
+
+  it("returns species-list forms to their canonical list hierarchy", () => {
+    dismissToSpeciesLists(router);
+    expect(dismissTo).toHaveBeenLastCalledWith("/species-lists");
+
+    dismissToSpeciesList(router, "list-1");
+    expect(dismissTo).toHaveBeenLastCalledWith({
+      pathname: "/species-lists/[listId]",
+      params: { listId: "list-1" },
     });
   });
 });

@@ -1,16 +1,17 @@
 import type { SurveyBackup } from "@/domain/models";
-import { getSurvey, listLocales, listObservations } from "@/storage/database";
+import { getSpeciesList, getSurvey, listLocales, listObservations } from "@/storage/database";
 import { createSurveyWorkbook, sanitizeFileName } from "./xlsx";
 
 export async function shareSurveyExcel(surveyId: string): Promise<string> {
   const survey = await getSurvey(surveyId);
   if (!survey) throw new Error("Inventeringen kunde inte hittas.");
-  const [locales, observations] = await Promise.all([
+  const [locales, observations, speciesList] = await Promise.all([
     listLocales(surveyId),
     listObservations(surveyId),
+    survey.speciesListId ? getSpeciesList(survey.speciesListId) : Promise.resolve(null),
   ]);
   const name = `${sanitizeFileName(survey.title)}_${survey.surveyDate}.xlsx`;
-  const workbook = createSurveyWorkbook(survey, locales, observations);
+  const workbook = createSurveyWorkbook(survey, locales, observations, speciesList ?? undefined);
   download(
     name,
     new Blob([Uint8Array.from(workbook).buffer], {

@@ -1,19 +1,20 @@
 import { Stack, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { Alert, StyleSheet, Text, View } from "react-native";
+import { Alert, StyleSheet, View } from "react-native";
 
 import { findRegion, type RegionOption } from "@/data/regions";
+import { VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
 import type { Region, SurveyDraft } from "@/domain/models";
 import { todayLocal } from "@/domain/time";
 import { hasErrors, validateSurveyDraft, type ValidationErrors } from "@/domain/validation";
 import { RegionPicker } from "@/features/regions/RegionPicker";
+import { TaxonomySpeciesListFields } from "@/features/taxonomy/TaxonomySpeciesListFields";
 import { dismissToSurvey } from "@/navigation/hierarchy";
-import { createSurvey, loadDraft, saveDraft } from "@/storage/database";
+import { createSurvey, getAppSettings, loadDraft, saveDraft } from "@/storage/database";
 import { Button } from "@/ui/Button";
-import { Card } from "@/ui/Card";
 import { Field } from "@/ui/Field";
 import { Screen } from "@/ui/Screen";
-import { colors, spacing } from "@/ui/theme";
+import { spacing } from "@/ui/theme";
 
 const EMPTY_DRAFT: SurveyDraft = {
   title: "",
@@ -22,6 +23,8 @@ const EMPTY_DRAFT: SurveyDraft = {
   countyCode: "",
   municipalityCode: "",
   regionFreeText: "",
+  taxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId,
+  speciesListId: "",
 };
 
 export default function NewSurveyScreen() {
@@ -33,11 +36,16 @@ export default function NewSurveyScreen() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    loadDraft<SurveyDraft>("survey:new")
-      .then((stored) => {
-        if (stored) {
-          setDraft(stored);
-          setSelectedRegion(findRegion(stored.countyCode, stored.municipalityCode || undefined));
+    Promise.all([loadDraft<Partial<SurveyDraft>>("survey:new"), getAppSettings()])
+      .then(([stored, settings]) => {
+        const initial = {
+          ...EMPTY_DRAFT,
+          taxonomyPackageId: settings.defaultTaxonomyPackageId,
+          ...stored,
+        };
+        setDraft(initial);
+        if (initial.countyCode) {
+          setSelectedRegion(findRegion(initial.countyCode, initial.municipalityCode || undefined));
         }
       })
       .finally(() => setHydrated(true));
@@ -123,14 +131,13 @@ export default function NewSurveyScreen() {
         onChangeText={(value) => update("regionFreeText", value)}
         placeholder="Till exempel Lillåsen, norra delen"
       />
-      <Card>
-        <Text style={styles.cardTitle}>Taxonomi</Text>
-        <Text style={styles.cardValue}>Kärlväxter – offline-startlista</Text>
-        <Text style={styles.cardBody}>
-          MVP:n innehåller en liten lokal startlista och tillåter alltid fritext. Det fullständiga
-          Dyntaxa-paketet kan anslutas utan att ändra observationerna.
-        </Text>
-      </Card>
+      <TaxonomySpeciesListFields
+        taxonomyPackageId={draft.taxonomyPackageId}
+        speciesListId={draft.speciesListId}
+        onTaxonomyChange={(value) => update("taxonomyPackageId", value)}
+        onSpeciesListChange={(value) => update("speciesListId", value)}
+        taxonomyError={errors.taxonomyPackageId}
+      />
       <View style={styles.actions}>
         <Button label="Spara inventering" onPress={() => void save()} loading={saving} disabled={!canSave} />
         <Button label="Avbryt" variant="ghost" onPress={() => router.back()} />
@@ -144,8 +151,5 @@ function messageOf(error: unknown): string {
 }
 
 const styles = StyleSheet.create({
-  cardTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
-  cardValue: { color: colors.green800, fontSize: 16, marginTop: spacing.xs },
-  cardBody: { color: colors.textMuted, lineHeight: 20, marginTop: spacing.sm },
   actions: { gap: spacing.sm },
 });

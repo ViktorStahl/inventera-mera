@@ -26,6 +26,11 @@ export default function RootLayout() {
           options={{ title: "Redigera inventering", presentation: "modal" }}
         />
         <Stack.Screen name="surveys/[surveyId]/map" options={{ title: "Karta" }} />
+        <Stack.Screen name="species-lists/index" options={{ title: "Artlistor" }} />
+        <Stack.Screen name="species-lists/new" options={{ title: "Ny artlista", presentation: "modal" }} />
+        <Stack.Screen name="species-lists/[listId]/index" options={{ title: "Artlista" }} />
+        <Stack.Screen name="species-lists/[listId]/add" options={{ title: "Lägg till arter", presentation: "modal" }} />
+        <Stack.Screen name="settings" options={{ title: "Inställningar" }} />
         <Stack.Screen
           name="surveys/[surveyId]/locales/new"
           options={{ title: "Ny lokal", presentation: "modal" }}

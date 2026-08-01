@@ -1,10 +1,20 @@
 import * as Location from "expo-location";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, AppState, StyleSheet, Text, View } from "react-native";
 
+import { VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
 import { rt90ToWgs84, wgs84ToRt90 } from "@/domain/coordinates";
-import type { Observation, ObservationDraft, SurveyLocale, Taxon } from "@/domain/models";
+import type {
+  Observation,
+  ObservationDraft,
+  SpeciesList,
+  SpeciesSnapshot,
+  Survey,
+  SurveyLocale,
+  Taxon,
+} from "@/domain/models";
+import { speciesKey, taxonomySpeciesSnapshot } from "@/domain/species";
 import {
   currentTimeZone,
   localDateFromIso,
@@ -26,11 +36,13 @@ import {
   deleteObservation,
   getLocale,
   getObservation,
+  getSpeciesList,
   getSurvey,
   loadDraft,
   observationDraftKey,
   observationEditDraftKey,
   saveDraft,
+  speciesListContains,
   updateObservation,
 } from "@/storage/database";
 import { Button } from "@/ui/Button";
@@ -57,6 +69,7 @@ function draftFromLocale(locale: SurveyLocale): ObservationDraft {
     unit: "",
     publicComment: "",
     additionalObservers: "",
+    addToSpeciesList: false,
   };
 }
 
@@ -68,7 +81,13 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
   }>();
   const { surveyId, observationId } = params;
   const router = useRouter();
+  const [survey, setSurvey] = useState<Survey>();
   const [locale, setLocale] = useState<SurveyLocale>();
+  const [speciesList, setSpeciesList] = useState<SpeciesList>();
+  const [speciesMembership, setSpeciesMembership] = useState<{
+    key: string;
+    contained: boolean;
+  }>();
   const [observation, setObservation] = useState<Observation>();
   const [draft, setDraft] = useState<ObservationDraft>();
   const [errors, setErrors] = useState<ValidationErrors<ObservationDraft>>({});
@@ -76,6 +95,26 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [locating, setLocating] = useState(false);
+  const draftSpeciesQuery = draft?.speciesQuery ?? "";
+  const draftSelectedTaxon = draft?.selectedTaxon;
+
+  const membershipCandidate = useMemo(() => {
+    if (!speciesList || !survey || !draftSpeciesQuery.trim()) return undefined;
+    const species = speciesSnapshotForSelection(
+      draftSpeciesQuery,
+      draftSelectedTaxon,
+      survey,
+      observation,
+    );
+    return {
+      key: `${speciesList.id}:${speciesKey(species)}`,
+      listId: speciesList.id,
+      species,
+    };
+  }, [draftSelectedTaxon, draftSpeciesQuery, observation, speciesList, survey]);
+  const speciesAlreadyInList = membershipCandidate && speciesMembership?.key === membershipCandidate.key
+    ? speciesMembership.contained
+    : undefined;
 
   useEffect(() => {
     if (!surveyId || (editing && !observationId) || (!editing && !params.localeId)) return;
@@ -93,9 +132,21 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
         ? observationEditDraftKey(surveyId, localeId, observationId!)
         : observationDraftKey(surveyId, localeId);
       const stored = await loadDraft<ObservationDraft>(key);
+      const baseDraft = loadedObservation
+        ? observationToDraft(loadedObservation)
+        : draftFromLocale(loadedLocale);
+      const loadedSpeciesList = survey.speciesListId
+        ? await getSpeciesList(survey.speciesListId)
+        : null;
+      setSurvey(survey);
       setLocale(loadedLocale);
+      setSpeciesList(loadedSpeciesList ?? undefined);
       if (loadedObservation) setObservation(loadedObservation);
-      setDraft(stored ?? (loadedObservation ? observationToDraft(loadedObservation) : draftFromLocale(loadedLocale)));
+      setDraft(stored ? {
+        ...baseDraft,
+        ...stored,
+        addToSpeciesList: stored.addToSpeciesList ?? false,
+      } : baseDraft);
     }
     hydrate()
       .catch((error) => Alert.alert("Kunde inte öppna observationen", messageOf(error)))
@@ -112,6 +163,21 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
   }, [draft, editing, hydrated, locale, observationId, surveyId]);
 
   useEffect(() => {
+    if (!membershipCandidate) return;
+    let active = true;
+    speciesListContains(membershipCandidate.listId, membershipCandidate.species)
+      .then((contained) => {
+        if (active) setSpeciesMembership({ key: membershipCandidate.key, contained });
+      })
+      .catch(() => {
+        if (active) setSpeciesMembership({ key: membershipCandidate.key, contained: false });
+      });
+    return () => {
+      active = false;
+    };
+  }, [membershipCandidate]);
+
+  useEffect(() => {
     if (!hydrated || !surveyId || !locale || !draft || (editing && !observationId)) return;
     const key = editing
       ? observationEditDraftKey(surveyId, locale.id, observationId!)
@@ -125,6 +191,27 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
   function update<K extends keyof ObservationDraft>(key: K, value: ObservationDraft[K]) {
     setDraft((current) => (current ? { ...current, [key]: value } : current));
     setErrors((current) => ({ ...current, [key]: undefined }));
+  }
+
+  function updateSpeciesQuery(value: string) {
+    setDraft((current) => current ? {
+      ...current,
+      speciesQuery: value,
+      addToSpeciesList: false,
+      selectedTaxon:
+        current.selectedTaxon && value === current.selectedTaxon.preferredName
+          ? current.selectedTaxon
+          : undefined,
+    } : current);
+    setErrors((current) => ({ ...current, speciesQuery: undefined }));
+  }
+
+  function selectSpecies(value: Taxon | undefined) {
+    setDraft((current) => current ? {
+      ...current,
+      selectedTaxon: value,
+      addToSpeciesList: false,
+    } : current);
   }
 
   function updateTime(key: "date" | "time", value: string) {
@@ -213,7 +300,7 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
   }
 
   async function save() {
-    if (!surveyId || !locale || !draft) return;
+    if (!surveyId || !locale || !draft || !survey) return;
     const nextErrors = validateObservationDraft(draft);
     setErrors(nextErrors);
     if (hasErrors(nextErrors)) return;
@@ -227,8 +314,12 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
         draft.positionSource === "device" && draft.latitude != null && draft.longitude != null
           ? { latitude: draft.latitude, longitude: draft.longitude }
           : rt90ToWgs84(rt90);
-      const selected = draft.selectedTaxon;
-      const keepsOriginalTaxon = selected?.id === observation?.species.taxonId;
+      const species = speciesSnapshotForSelection(
+        draft.speciesQuery,
+        draft.selectedTaxon,
+        survey,
+        observation,
+      );
       const input = {
         surveyId,
         localeId: locale.id,
@@ -243,29 +334,16 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
           source: draft.positionSource,
         },
         positionOverridden: draft.positionOverridden,
-        species: selected
-          ? {
-              source: "taxonomy" as const,
-              enteredName: draft.speciesQuery.trim(),
-              taxonId: selected.id,
-              preferredName: selected.preferredName,
-              scientificName: selected.scientificName,
-              taxonomyPackageId: keepsOriginalTaxon
-                ? (observation?.species.taxonomyPackageId ?? "vascular-plants-starter")
-                : "vascular-plants-starter",
-              taxonomyVersion: keepsOriginalTaxon
-                ? (observation?.species.taxonomyVersion ?? "2026-07-mvp")
-                : "2026-07-mvp",
-            }
-          : { source: "free-text" as const, enteredName: draft.speciesQuery.trim() },
+        species,
         amount: draft.amount.trim()
           ? { value: Number(draft.amount.replace(",", ".")), unit: draft.unit.trim() }
           : undefined,
         publicComment: draft.publicComment.trim() || undefined,
         additionalObservers: parseAdditionalObservers(draft.additionalObservers),
       };
-      if (editing && observationId) await updateObservation(observationId, input);
-      else await createObservation(input);
+      const addToListId = draft.addToSpeciesList ? speciesList?.id : undefined;
+      if (editing && observationId) await updateObservation(observationId, input, addToListId);
+      else await createObservation(input, addToListId);
       dismissToLocale(router, surveyId, locale.id);
     } catch (error) {
       Alert.alert("Observationen kunde inte sparas", messageOf(error));
@@ -291,7 +369,7 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
     }
   }
 
-  if (!draft || !locale) {
+  if (!draft || !locale || !survey) {
     return (
       <Screen scroll={false} contentContainerStyle={styles.center}>
         <ActivityIndicator color={colors.green700} size="large" />
@@ -349,10 +427,31 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
       <SpeciesPicker
         query={draft.speciesQuery}
         selectedTaxon={draft.selectedTaxon}
-        onQueryChange={(value) => update("speciesQuery", value)}
-        onSelect={(value) => update("selectedTaxon", value)}
+        taxonomyPackageId={survey.taxonomyRef?.packageId ?? VASCULAR_PLANTS_TAXONOMY.packageId}
+        speciesListId={speciesList?.id}
+        speciesListName={speciesList?.name}
+        onQueryChange={updateSpeciesQuery}
+        onSelect={selectSpecies}
         error={errors.speciesQuery}
       />
+      {speciesList && draft.speciesQuery.trim() ? (
+        speciesAlreadyInList ? (
+          <Card style={styles.inListCard}>
+            <Text style={styles.inListText}>✓ Arten finns redan i artlistan {speciesList.name}.</Text>
+          </Card>
+        ) : (
+          <Card
+            onPress={() => update("addToSpeciesList", !draft.addToSpeciesList)}
+            style={draft.addToSpeciesList ? styles.addToListSelected : undefined}
+            accessibilityLabel={`${draft.addToSpeciesList ? "Ta bort valet att lägga" : "Lägg"} arten i artlistan ${speciesList.name}`}
+          >
+            <Text style={styles.addToListTitle}>
+              {draft.addToSpeciesList ? "✓ Läggs till" : "Lägg till arten"} i {speciesList.name}
+            </Text>
+            <Text style={styles.addToListHint}>Arten sparas samtidigt som observationen.</Text>
+          </Card>
+        )
+      ) : null}
       <View style={styles.twoColumns}>
         <View style={styles.column}><Field label="Antal (valfritt)" value={draft.amount} onChangeText={(value) => update("amount", value)} keyboardType="decimal-pad" error={errors.amount} /></View>
         <View style={styles.column}><Field label="Enhet" value={draft.unit} onChangeText={(value) => update("unit", value)} placeholder="individer" error={errors.unit} /></View>
@@ -386,7 +485,34 @@ function observationToDraft(observation: Observation): ObservationDraft {
     unit: observation.amount?.unit ?? "",
     publicComment: observation.publicComment ?? "",
     additionalObservers: observation.additionalObservers.join("; "),
+    addToSpeciesList: false,
   };
+}
+
+function speciesSnapshotForSelection(
+  query: string,
+  selectedTaxon: Taxon | undefined,
+  survey: Survey,
+  original?: Observation,
+): SpeciesSnapshot {
+  if (!selectedTaxon || selectedTaxon.source === "free-text") {
+    return { source: "free-text", enteredName: query.trim() };
+  }
+  const keepsOriginalTaxon = selectedTaxon.id === original?.species.taxonId;
+  const taxonomy = selectedTaxon.taxonomyPackageId
+    ? {
+        packageId: selectedTaxon.taxonomyPackageId,
+        name: survey.taxonomyRef?.name ?? VASCULAR_PLANTS_TAXONOMY.name,
+        version: selectedTaxon.taxonomyVersion ?? survey.taxonomyRef?.version ?? VASCULAR_PLANTS_TAXONOMY.version,
+      }
+    : keepsOriginalTaxon && original?.species.taxonomyPackageId
+    ? {
+        packageId: original.species.taxonomyPackageId,
+        name: survey.taxonomyRef?.name ?? VASCULAR_PLANTS_TAXONOMY.name,
+        version: original.species.taxonomyVersion ?? survey.taxonomyRef?.version ?? VASCULAR_PLANTS_TAXONOMY.version,
+      }
+    : (survey.taxonomyRef ?? VASCULAR_PLANTS_TAXONOMY);
+  return taxonomySpeciesSnapshot(selectedTaxon, taxonomy, query);
 }
 
 function taxonFromObservation(observation: Observation): Taxon | undefined {
@@ -398,6 +524,8 @@ function taxonFromObservation(observation: Observation): Taxon | undefined {
     synonyms: [],
     rank: "",
     status: "",
+    taxonomyPackageId: observation.species.taxonomyPackageId,
+    taxonomyVersion: observation.species.taxonomyVersion,
   };
 }
 
@@ -414,5 +542,10 @@ const styles = StyleSheet.create({
   column: { flex: 1 },
   sectionTitle: { color: colors.text, fontSize: 16, fontWeight: "700", marginBottom: -spacing.sm },
   overrideStatus: { color: colors.green800, fontSize: 13, marginTop: -spacing.sm },
+  inListCard: { backgroundColor: colors.green100 },
+  inListText: { color: colors.green800, fontWeight: "700" },
+  addToListSelected: { borderColor: colors.green700, borderWidth: 2, backgroundColor: colors.green100 },
+  addToListTitle: { color: colors.green800, fontSize: 16, fontWeight: "700" },
+  addToListHint: { color: colors.textMuted, marginTop: spacing.xs },
   actions: { gap: spacing.sm, marginTop: spacing.sm },
 });

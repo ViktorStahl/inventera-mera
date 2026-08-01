@@ -2,11 +2,16 @@ import * as Crypto from "expo-crypto";
 import * as SQLite from "expo-sqlite";
 
 import { SEED_TAXA } from "@/data/seedTaxa";
+import { findTaxonomy, VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
 import type {
+  AppSettings,
   LocaleListItem,
   Observation,
   Position,
   Region,
+  SpeciesList,
+  SpeciesListEntry,
+  SpeciesListSummary,
   SpeciesSnapshot,
   Survey,
   SurveyBackup,
@@ -16,10 +21,11 @@ import type {
   Taxon,
   TaxonomyReference,
 } from "@/domain/models";
+import { normalizeSpeciesName, speciesKey } from "@/domain/species";
 import { migrateLegacyObservations, type LegacyObservation } from "./migrateLocales";
 
 const DATABASE_NAME = "inventera-mera.db";
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | undefined;
 
@@ -43,6 +49,7 @@ async function openAndMigrate(): Promise<SQLite.SQLiteDatabase> {
   }
   if (version < 1) await migrateToVersionOne(database);
   if (version < 2) await migrateToVersionTwo(database);
+  if (version < 3) await migrateToVersionThree(database);
   await seedTaxonomy(database);
   return database;
 }
@@ -210,6 +217,49 @@ async function migrateToVersionTwo(database: SQLite.SQLiteDatabase): Promise<voi
   });
 }
 
+async function migrateToVersionThree(database: SQLite.SQLiteDatabase): Promise<void> {
+  await database.withTransactionAsync(async () => {
+    await database.execAsync(`
+      CREATE TABLE species_lists (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+        taxonomy_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE species_list_entries (
+        id TEXT PRIMARY KEY NOT NULL,
+        species_list_id TEXT NOT NULL REFERENCES species_lists(id) ON DELETE CASCADE,
+        species_key TEXT NOT NULL,
+        taxon_id TEXT,
+        species_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(species_list_id, species_key)
+      );
+
+      CREATE INDEX species_lists_name ON species_lists(name COLLATE NOCASE);
+      CREATE INDEX species_list_entries_list_created
+        ON species_list_entries(species_list_id, created_at ASC);
+      CREATE INDEX species_list_entries_list_taxon
+        ON species_list_entries(species_list_id, taxon_id);
+
+      ALTER TABLE surveys ADD COLUMN species_list_id TEXT
+        REFERENCES species_lists(id) ON DELETE SET NULL;
+
+      CREATE TABLE app_settings (
+        id INTEGER PRIMARY KEY NOT NULL CHECK(id = 1),
+        default_taxonomy_package_id TEXT NOT NULL
+      );
+
+      INSERT INTO app_settings(id, default_taxonomy_package_id)
+      VALUES (1, 'vascular-plants-starter');
+
+      PRAGMA user_version = 3;
+    `);
+  });
+}
+
 async function seedTaxonomy(database: SQLite.SQLiteDatabase): Promise<void> {
   const row = await database.getFirstAsync<{ count: number }>(
     "SELECT count(*) AS count FROM taxon_search",
@@ -230,6 +280,173 @@ async function seedTaxonomy(database: SQLite.SQLiteDatabase): Promise<void> {
       );
     }
   });
+}
+
+export async function getAppSettings(): Promise<AppSettings> {
+  const database = await getDatabase();
+  const row = await database.getFirstAsync<{ default_taxonomy_package_id: string }>(
+    "SELECT default_taxonomy_package_id FROM app_settings WHERE id = 1",
+  );
+  return {
+    defaultTaxonomyPackageId:
+      row?.default_taxonomy_package_id ?? VASCULAR_PLANTS_TAXONOMY.packageId,
+  };
+}
+
+export async function updateDefaultTaxonomy(packageId: string): Promise<void> {
+  if (!findTaxonomy(packageId)) throw new Error("Taxonomin kunde inte hittas.");
+  const database = await getDatabase();
+  await database.runAsync(
+    "UPDATE app_settings SET default_taxonomy_package_id = ? WHERE id = 1",
+    packageId,
+  );
+}
+
+export async function listSpeciesLists(
+  search = "",
+  taxonomyPackageId?: string,
+): Promise<SpeciesListSummary[]> {
+  const database = await getDatabase();
+  const pattern = `%${search.trim()}%`;
+  const rows = await database.getAllAsync<SpeciesListRow & { species_count: number }>(
+    `SELECT species_lists.*, count(species_list_entries.id) AS species_count
+       FROM species_lists
+       LEFT JOIN species_list_entries
+         ON species_list_entries.species_list_id = species_lists.id
+      WHERE species_lists.name LIKE ? COLLATE NOCASE
+        AND (? IS NULL OR json_extract(species_lists.taxonomy_json, '$.packageId') = ?)
+      GROUP BY species_lists.id
+      ORDER BY species_lists.updated_at DESC, species_lists.name COLLATE NOCASE`,
+    pattern,
+    taxonomyPackageId ?? null,
+    taxonomyPackageId ?? null,
+  );
+  return rows.map((row) => ({ ...speciesListFromRow(row), speciesCount: row.species_count }));
+}
+
+export async function getSpeciesList(id: string): Promise<SpeciesList | null> {
+  const database = await getDatabase();
+  const row = await database.getFirstAsync<SpeciesListRow>(
+    "SELECT * FROM species_lists WHERE id = ?",
+    id,
+  );
+  return row ? speciesListFromRow(row) : null;
+}
+
+export async function createSpeciesList(
+  name: string,
+  taxonomyRef: TaxonomyReference,
+): Promise<SpeciesList> {
+  if (!name.trim()) throw new Error("Ange ett namn på artlistan.");
+  if (!findTaxonomy(taxonomyRef.packageId)) throw new Error("Taxonomin kunde inte hittas.");
+  const now = new Date().toISOString();
+  const list: SpeciesList = {
+    id: Crypto.randomUUID(),
+    name: name.trim(),
+    taxonomyRef: {
+      packageId: taxonomyRef.packageId,
+      name: taxonomyRef.name,
+      version: taxonomyRef.version,
+    },
+    createdAt: now,
+    updatedAt: now,
+  };
+  const database = await getDatabase();
+  await insertSpeciesList(database, list);
+  return list;
+}
+
+export async function renameSpeciesList(id: string, name: string): Promise<SpeciesList> {
+  if (!name.trim()) throw new Error("Ange ett namn på artlistan.");
+  const existing = await getSpeciesList(id);
+  if (!existing) throw new Error("Artlistan kunde inte hittas.");
+  const updated = { ...existing, name: name.trim(), updatedAt: new Date().toISOString() };
+  const database = await getDatabase();
+  await database.runAsync(
+    "UPDATE species_lists SET name = ?, updated_at = ? WHERE id = ?",
+    updated.name,
+    updated.updatedAt,
+    id,
+  );
+  return updated;
+}
+
+export async function deleteSpeciesList(id: string): Promise<void> {
+  const database = await getDatabase();
+  const result = await database.runAsync("DELETE FROM species_lists WHERE id = ?", id);
+  if (result.changes !== 1) throw new Error("Artlistan kunde inte hittas.");
+}
+
+export async function listSpeciesListEntries(listId: string): Promise<SpeciesListEntry[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<SpeciesListEntryRow>(
+    `SELECT * FROM species_list_entries WHERE species_list_id = ?
+      ORDER BY json_extract(species_json, '$.preferredName') COLLATE NOCASE,
+        json_extract(species_json, '$.enteredName') COLLATE NOCASE`,
+    listId,
+  );
+  return rows.map(speciesListEntryFromRow);
+}
+
+export async function addSpeciesToList(
+  listId: string,
+  species: SpeciesSnapshot,
+): Promise<SpeciesListEntry> {
+  const database = await getDatabase();
+  const list = await getSpeciesList(listId);
+  if (!list) throw new Error("Artlistan kunde inte hittas.");
+  const normalizedSpecies = normalizeSpeciesForList(list, species);
+  const entry: SpeciesListEntry = {
+    id: Crypto.randomUUID(),
+    speciesListId: listId,
+    speciesKey: speciesKey(normalizedSpecies),
+    species: normalizedSpecies,
+    createdAt: new Date().toISOString(),
+  };
+  await database.withTransactionAsync(async () => {
+    await insertSpeciesListEntry(database, entry, true);
+    await database.runAsync(
+      "UPDATE species_lists SET updated_at = ? WHERE id = ?",
+      new Date().toISOString(),
+      listId,
+    );
+  });
+  const existing = await database.getFirstAsync<SpeciesListEntryRow>(
+    "SELECT * FROM species_list_entries WHERE species_list_id = ? AND species_key = ?",
+    listId,
+    entry.speciesKey,
+  );
+  if (!existing) throw new Error("Arten kunde inte läggas till i artlistan.");
+  return speciesListEntryFromRow(existing);
+}
+
+export async function removeSpeciesFromList(listId: string, entryId: string): Promise<void> {
+  const database = await getDatabase();
+  const result = await database.runAsync(
+    "DELETE FROM species_list_entries WHERE id = ? AND species_list_id = ?",
+    entryId,
+    listId,
+  );
+  if (result.changes !== 1) throw new Error("Arten kunde inte hittas i artlistan.");
+  await database.runAsync(
+    "UPDATE species_lists SET updated_at = ? WHERE id = ?",
+    new Date().toISOString(),
+    listId,
+  );
+}
+
+export async function speciesListContains(
+  listId: string,
+  species: SpeciesSnapshot,
+): Promise<boolean> {
+  const database = await getDatabase();
+  const row = await database.getFirstAsync<{ found: number }>(
+    `SELECT EXISTS(SELECT 1 FROM species_list_entries
+      WHERE species_list_id = ? AND species_key = ?) AS found`,
+    listId,
+    speciesKey(species),
+  );
+  return row?.found === 1;
 }
 
 export async function listSurveys(search = ""): Promise<SurveyListItem[]> {
@@ -280,17 +497,21 @@ export async function getSurvey(id: string): Promise<Survey | null> {
 
 export async function createSurvey(draft: SurveyDraft, region: Region): Promise<Survey> {
   const database = await getDatabase();
+  const taxonomy = findTaxonomy(draft.taxonomyPackageId);
+  if (!taxonomy) throw new Error("Taxonomin kunde inte hittas.");
+  const speciesList = draft.speciesListId ? await getSpeciesList(draft.speciesListId) : null;
+  if (draft.speciesListId && !speciesList) throw new Error("Artlistan kunde inte hittas.");
+  if (speciesList && speciesList.taxonomyRef.packageId !== taxonomy.packageId) {
+    throw new Error("Artlistan använder en annan taxonomi.");
+  }
   const now = new Date().toISOString();
   const survey: Survey = {
     id: Crypto.randomUUID(),
     title: draft.title.trim(),
     description: optionalText(draft.description),
     region,
-    taxonomyRef: {
-      packageId: "vascular-plants-starter",
-      name: "Kärlväxter – startlista",
-      version: "2026-07-mvp",
-    },
+    taxonomyRef: taxonomyReference(taxonomy),
+    speciesListId: speciesList?.id,
     surveyDate: draft.surveyDate,
     status: "active",
     createdAt: now,
@@ -309,11 +530,20 @@ export async function updateSurvey(
   const database = await getDatabase();
   const existing = await getSurvey(id);
   if (!existing) throw new Error("Inventeringen kunde inte hittas.");
+  const taxonomy = findTaxonomy(draft.taxonomyPackageId);
+  if (!taxonomy) throw new Error("Taxonomin kunde inte hittas.");
+  const speciesList = draft.speciesListId ? await getSpeciesList(draft.speciesListId) : null;
+  if (draft.speciesListId && !speciesList) throw new Error("Artlistan kunde inte hittas.");
+  if (speciesList && speciesList.taxonomyRef.packageId !== taxonomy.packageId) {
+    throw new Error("Artlistan använder en annan taxonomi.");
+  }
   const updated: Survey = {
     ...existing,
     title: draft.title.trim(),
     description: optionalText(draft.description),
     region,
+    taxonomyRef: taxonomyReference(taxonomy),
+    speciesListId: speciesList?.id,
     surveyDate: draft.surveyDate,
     updatedAt: new Date().toISOString(),
   };
@@ -322,7 +552,8 @@ export async function updateSurvey(
       `UPDATE surveys SET
         title = ?, description = ?, county_code = ?, county_name = ?,
         municipality_code = ?, municipality_name = ?, region_free_text = ?,
-        region_source = ?, region_source_version = ?, survey_date = ?, updated_at = ?
+        region_source = ?, region_source_version = ?, taxonomy_json = ?,
+        species_list_id = ?, survey_date = ?, updated_at = ?
        WHERE id = ?`,
       updated.title,
       updated.description ?? null,
@@ -333,6 +564,8 @@ export async function updateSurvey(
       updated.region.freeText ?? null,
       updated.region.source,
       updated.region.sourceVersion,
+      JSON.stringify(updated.taxonomyRef),
+      updated.speciesListId ?? null,
       updated.surveyDate,
       updated.updatedAt,
       updated.id,
@@ -506,10 +739,17 @@ export async function getObservation(
   return row ? observationFromRow(row) : null;
 }
 
-export async function createObservation(input: ObservationInput): Promise<Observation> {
+export async function createObservation(
+  input: ObservationInput,
+  addToSpeciesListId?: string,
+): Promise<Observation> {
   const database = await getDatabase();
-  const locale = await getLocale(input.surveyId, input.localeId);
+  const [locale, speciesList] = await Promise.all([
+    getLocale(input.surveyId, input.localeId),
+    addToSpeciesListId ? getSpeciesList(addToSpeciesListId) : Promise.resolve(null),
+  ]);
   if (!locale) throw new Error("Lokalen kunde inte hittas.");
+  if (addToSpeciesListId) await assertSurveySpeciesList(input.surveyId, addToSpeciesListId, speciesList);
   const now = new Date().toISOString();
   const saved: Observation = {
     ...resolveObservationInput(input, locale),
@@ -519,6 +759,14 @@ export async function createObservation(input: ObservationInput): Promise<Observ
   };
   await database.withTransactionAsync(async () => {
     await insertObservation(database, saved);
+    if (speciesList) {
+      await insertSpeciesListEntry(
+        database,
+        newSpeciesListEntry(speciesList.id, normalizeSpeciesForList(speciesList, saved.species)),
+        true,
+      );
+      await database.runAsync("UPDATE species_lists SET updated_at = ? WHERE id = ?", now, speciesList.id);
+    }
     await database.runAsync("UPDATE surveys SET updated_at = ? WHERE id = ?", now, saved.surveyId);
     await database.runAsync(
       "DELETE FROM drafts WHERE key = ?",
@@ -531,14 +779,17 @@ export async function createObservation(input: ObservationInput): Promise<Observ
 export async function updateObservation(
   observationId: string,
   input: ObservationInput,
+  addToSpeciesListId?: string,
 ): Promise<Observation> {
   const database = await getDatabase();
-  const [existing, locale] = await Promise.all([
+  const [existing, locale, speciesList] = await Promise.all([
     getObservation(input.surveyId, observationId),
     getLocale(input.surveyId, input.localeId),
+    addToSpeciesListId ? getSpeciesList(addToSpeciesListId) : Promise.resolve(null),
   ]);
   if (!existing) throw new Error("Observationen kunde inte hittas.");
   if (!locale) throw new Error("Lokalen kunde inte hittas.");
+  if (addToSpeciesListId) await assertSurveySpeciesList(input.surveyId, addToSpeciesListId, speciesList);
   const updated: Observation = {
     ...resolveObservationInput(input, locale),
     id: existing.id,
@@ -548,6 +799,18 @@ export async function updateObservation(
   await database.withTransactionAsync(async () => {
     const result = await updateObservationRow(database, updated);
     if (result.changes !== 1) throw new Error("Observationen kunde inte hittas.");
+    if (speciesList) {
+      await insertSpeciesListEntry(
+        database,
+        newSpeciesListEntry(speciesList.id, normalizeSpeciesForList(speciesList, updated.species)),
+        true,
+      );
+      await database.runAsync(
+        "UPDATE species_lists SET updated_at = ? WHERE id = ?",
+        updated.updatedAt,
+        speciesList.id,
+      );
+    }
     await database.runAsync(
       "UPDATE surveys SET updated_at = ? WHERE id = ?",
       updated.updatedAt,
@@ -585,7 +848,18 @@ export async function deleteObservation(
   });
 }
 
-export async function searchTaxa(query: string, limit = 20): Promise<Taxon[]> {
+export async function searchTaxa(
+  query: string,
+  limit = 20,
+  speciesListId?: string,
+  taxonomyPackageId = VASCULAR_PLANTS_TAXONOMY.packageId,
+): Promise<Taxon[]> {
+  if (!findTaxonomy(taxonomyPackageId)) return [];
+  const selectedSpeciesList = speciesListId ? await getSpeciesList(speciesListId) : null;
+  if (
+    speciesListId &&
+    (!selectedSpeciesList || selectedSpeciesList.taxonomyRef.packageId !== taxonomyPackageId)
+  ) return [];
   const database = await getDatabase();
   const terms = query
     .trim()
@@ -594,20 +868,85 @@ export async function searchTaxa(query: string, limit = 20): Promise<Taxon[]> {
     .filter(Boolean);
   if (terms.length === 0) return [];
   const match = terms.map((term) => `"${term.replaceAll('"', '""')}"*`).join(" AND ");
+  const listEntries = selectedSpeciesList
+    ? await listSpeciesListEntries(selectedSpeciesList.id)
+    : [];
+  const listTaxonIds = new Set(
+    listEntries
+      .map((entry) => entry.species.taxonId)
+      .filter((taxonId): taxonId is string => Boolean(taxonId)),
+  );
+  const listMatches = listEntries
+    .filter((entry) => speciesSnapshotMatches(entry.species, terms))
+    .map(speciesListEntryToTaxon);
   const rows = await database.getAllAsync<TaxonRow>(
     `SELECT id, preferred_name, scientific_name, synonyms, taxon_rank, status
-       FROM taxon_search WHERE taxon_search MATCH ? LIMIT ?`,
+       FROM taxon_search WHERE taxon_search MATCH ?
+       ORDER BY bm25(taxon_search), preferred_name COLLATE NOCASE
+       LIMIT ?`,
     match,
-    limit,
+    Math.max(limit * 4, limit),
   );
-  return rows.map((row) => ({
-    id: row.id,
-    preferredName: row.preferred_name,
-    scientificName: row.scientific_name,
-    synonyms: row.synonyms ? row.synonyms.split(" | ") : [],
-    rank: row.taxon_rank,
-    status: row.status,
-  }));
+  const taxonomyMatches: Taxon[] = rows
+    .filter((row) => !listTaxonIds.has(row.id))
+    .map((row) => ({
+      id: row.id,
+      source: "taxonomy",
+      preferredName: row.preferred_name,
+      scientificName: row.scientific_name,
+      synonyms: row.synonyms ? row.synonyms.split(" | ") : [],
+      rank: row.taxon_rank,
+      status: row.status,
+      inSpeciesList: false,
+    }));
+  return [...listMatches, ...taxonomyMatches]
+    .sort((left, right) =>
+      Number(Boolean(right.inSpeciesList)) - Number(Boolean(left.inSpeciesList)) ||
+      taxonMatchScore(left, terms) - taxonMatchScore(right, terms) ||
+      left.preferredName.localeCompare(right.preferredName, "sv"),
+    )
+    .slice(0, limit);
+}
+
+function speciesSnapshotMatches(species: SpeciesSnapshot, terms: string[]): boolean {
+  const searchable = normalizeSpeciesName([
+    species.enteredName,
+    species.preferredName,
+    species.scientificName,
+  ].filter(Boolean).join(" "));
+  return terms.every((term) => searchable.includes(normalizeSpeciesName(term)));
+}
+
+function speciesListEntryToTaxon(entry: SpeciesListEntry): Taxon {
+  const { species } = entry;
+  return {
+    id: species.taxonId ?? `species-list-entry:${entry.id}`,
+    source: species.source,
+    preferredName: species.preferredName ?? species.enteredName,
+    scientificName: species.scientificName ?? "",
+    synonyms: [],
+    rank: species.source === "free-text" ? "fritext" : "",
+    status: "artlista",
+    inSpeciesList: true,
+    speciesListEntryId: entry.id,
+    taxonomyPackageId: species.taxonomyPackageId,
+    taxonomyVersion: species.taxonomyVersion,
+  };
+}
+
+function taxonMatchScore(taxon: Taxon, terms: string[]): number {
+  const normalizedTerms = terms.map(normalizeSpeciesName);
+  const query = normalizedTerms.join(" ");
+  const preferred = normalizeSpeciesName(taxon.preferredName);
+  const scientific = normalizeSpeciesName(taxon.scientificName);
+  if (preferred === query || scientific === query) return 0;
+  if (preferred.startsWith(query) || scientific.startsWith(query)) return 1;
+  if (
+    preferred.split(/\s+/).some((word) => word.startsWith(normalizedTerms[0] ?? "")) ||
+    scientific.split(/\s+/).some((word) => word.startsWith(normalizedTerms[0] ?? ""))
+  ) return 2;
+  if (preferred.includes(query) || scientific.includes(query)) return 3;
+  return 4;
 }
 
 export async function saveDraft<T>(key: string, value: T): Promise<void> {
@@ -675,20 +1014,54 @@ function observationEditDraftPrefix(surveyId: string, localeId = ""): string {
 export async function buildSurveyBackup(surveyId: string): Promise<SurveyBackup> {
   const survey = await getSurvey(surveyId);
   if (!survey) throw new Error("Inventeringen kunde inte hittas.");
+  const speciesList = survey.speciesListId
+    ? await getSpeciesList(survey.speciesListId)
+    : null;
   return {
     format: "inventera-mera-backup",
-    formatVersion: 2,
+    formatVersion: 3,
     exportedAt: new Date().toISOString(),
     survey,
     locales: (await listLocales(surveyId)).map(({ observationCount: _, ...locale }) => locale),
     observations: await listObservations(surveyId),
+    speciesList: speciesList
+      ? { list: speciesList, entries: await listSpeciesListEntries(speciesList.id) }
+      : undefined,
   };
 }
 
 export async function restoreSurveyBackup(value: unknown): Promise<string> {
   const backup = normalizeBackup(value);
   const database = await getDatabase();
+  const existingSpeciesList = backup.speciesList
+    ? await getSpeciesList(backup.speciesList.list.id)
+    : null;
+  if (
+    existingSpeciesList &&
+    existingSpeciesList.taxonomyRef.packageId !== backup.speciesList?.list.taxonomyRef.packageId
+  ) {
+    throw new Error("En lokal artlista med samma ID använder en annan taxonomi.");
+  }
   await database.withTransactionAsync(async () => {
+    if (backup.speciesList) {
+      if (!existingSpeciesList) await insertSpeciesList(database, backup.speciesList.list);
+      for (const entry of backup.speciesList.entries) {
+        const duplicate = await database.getFirstAsync<{ id: string }>(
+          "SELECT id FROM species_list_entries WHERE species_list_id = ? AND species_key = ?",
+          entry.speciesListId,
+          entry.speciesKey,
+        );
+        if (duplicate) continue;
+        const idCollision = await database.getFirstAsync<{ id: string }>(
+          "SELECT id FROM species_list_entries WHERE id = ?",
+          entry.id,
+        );
+        await insertSpeciesListEntry(
+          database,
+          idCollision ? { ...entry, id: Crypto.randomUUID() } : entry,
+        );
+      }
+    }
     await database.runAsync("DELETE FROM surveys WHERE id = ?", backup.survey.id);
     await insertSurvey(database, backup.survey);
     for (const locale of backup.locales) await insertLocale(database, locale);
@@ -720,7 +1093,7 @@ function normalizeBackup(value: unknown): SurveyBackup {
     );
     return {
       format: "inventera-mera-backup",
-      formatVersion: 2,
+      formatVersion: 3,
       exportedAt:
         typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString(),
       survey,
@@ -729,11 +1102,37 @@ function normalizeBackup(value: unknown): SurveyBackup {
     };
   }
   if (
-    backup.formatVersion !== 2 ||
+    backup.formatVersion === 2 &&
+    Array.isArray(backup.locales) &&
+    Array.isArray(backup.observations)
+  ) {
+    return {
+      format: "inventera-mera-backup",
+      formatVersion: 3,
+      exportedAt:
+        typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString(),
+      survey,
+      locales: backup.locales as SurveyLocale[],
+      observations: backup.observations as Observation[],
+    };
+  }
+  if (
+    backup.formatVersion !== 3 ||
     !Array.isArray(backup.locales) ||
     !Array.isArray(backup.observations)
   ) {
     throw new Error("Backupformatet stöds inte.");
+  }
+  if (
+    backup.speciesList !== undefined &&
+    (
+      !backup.speciesList ||
+      typeof backup.speciesList !== "object" ||
+      !(backup.speciesList as Record<string, unknown>).list ||
+      !Array.isArray((backup.speciesList as Record<string, unknown>).entries)
+    )
+  ) {
+    throw new Error("Backupens artlista är ogiltig.");
   }
   const normalized = backup as unknown as SurveyBackup;
   if (normalized.locales.some((locale) => locale.surveyId !== survey.id)) {
@@ -748,7 +1147,107 @@ function normalizeBackup(value: unknown): SurveyBackup {
   ) {
     throw new Error("Backupen innehåller observationer från en annan inventering.");
   }
+  if (
+    normalized.survey.speciesListId &&
+    normalized.speciesList?.list.id !== normalized.survey.speciesListId
+  ) {
+    throw new Error("Backupen saknar inventeringens artlista.");
+  }
+  if (!normalized.survey.speciesListId && normalized.speciesList) {
+    throw new Error("Backupen innehåller en artlista som inte hör till inventeringen.");
+  }
+  if (normalized.speciesList) {
+    const { list, entries } = normalized.speciesList;
+    if (list.taxonomyRef.packageId !== normalized.survey.taxonomyRef?.packageId) {
+      throw new Error("Backupens artlista använder en annan taxonomi än inventeringen.");
+    }
+    if (
+      entries.some(
+        (entry) =>
+          entry.speciesListId !== list.id ||
+          entry.speciesKey !== speciesKey(normalizeSpeciesForList(list, entry.species)),
+      )
+    ) {
+      throw new Error("Backupen innehåller ogiltiga poster i artlistan.");
+    }
+  }
   return normalized;
+}
+
+async function assertSurveySpeciesList(
+  surveyId: string,
+  listId: string,
+  list: SpeciesList | null,
+): Promise<void> {
+  const survey = await getSurvey(surveyId);
+  if (!survey || survey.speciesListId !== listId || !list) {
+    throw new Error("Artlistan är inte vald för inventeringen.");
+  }
+}
+
+function newSpeciesListEntry(
+  listId: string,
+  species: SpeciesSnapshot,
+): SpeciesListEntry {
+  return {
+    id: Crypto.randomUUID(),
+    speciesListId: listId,
+    speciesKey: speciesKey(species),
+    species,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function normalizeSpeciesForList(
+  list: SpeciesList,
+  species: SpeciesSnapshot,
+): SpeciesSnapshot {
+  if (species.source === "free-text") return species;
+  if (!species.taxonId) throw new Error("En taxonomiart måste ha ett taxon-ID.");
+  if (
+    species.taxonomyPackageId &&
+    species.taxonomyPackageId !== list.taxonomyRef.packageId
+  ) {
+    throw new Error("Arten kommer från en annan taxonomi än artlistan.");
+  }
+  return {
+    ...species,
+    taxonomyPackageId: list.taxonomyRef.packageId,
+    taxonomyVersion: species.taxonomyVersion ?? list.taxonomyRef.version,
+  };
+}
+
+async function insertSpeciesList(
+  database: SQLite.SQLiteDatabase,
+  list: SpeciesList,
+): Promise<void> {
+  await database.runAsync(
+    `INSERT INTO species_lists(id, name, taxonomy_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)`,
+    list.id,
+    list.name,
+    JSON.stringify(list.taxonomyRef),
+    list.createdAt,
+    list.updatedAt,
+  );
+}
+
+async function insertSpeciesListEntry(
+  database: SQLite.SQLiteDatabase,
+  entry: SpeciesListEntry,
+  ignoreDuplicate = false,
+): Promise<void> {
+  await database.runAsync(
+    `${ignoreDuplicate ? "INSERT OR IGNORE" : "INSERT"} INTO species_list_entries(
+      id, species_list_id, species_key, taxon_id, species_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?)`,
+    entry.id,
+    entry.speciesListId,
+    entry.speciesKey,
+    entry.species.taxonId ?? null,
+    JSON.stringify(entry.species),
+    entry.createdAt,
+  );
 }
 
 async function insertSurvey(
@@ -761,9 +1260,9 @@ async function insertSurvey(
     `${command} INTO surveys (
       id, title, description, county_code, county_name, municipality_code,
       municipality_name, region_free_text, region_source,
-      region_source_version, taxonomy_json, survey_date, status, created_at,
-      updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      region_source_version, taxonomy_json, species_list_id, survey_date, status,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     survey.id,
     survey.title,
     survey.description ?? null,
@@ -775,6 +1274,7 @@ async function insertSurvey(
     survey.region.source,
     survey.region.sourceVersion,
     survey.taxonomyRef ? JSON.stringify(survey.taxonomyRef) : null,
+    survey.speciesListId ?? null,
     survey.surveyDate,
     survey.status,
     survey.createdAt,
@@ -925,10 +1425,31 @@ function surveyFromRow(row: SurveyRow): Survey {
     taxonomyRef: row.taxonomy_json
       ? (JSON.parse(row.taxonomy_json) as TaxonomyReference)
       : undefined,
+    speciesListId: row.species_list_id ?? undefined,
     surveyDate: row.survey_date,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function speciesListFromRow(row: SpeciesListRow): SpeciesList {
+  return {
+    id: row.id,
+    name: row.name,
+    taxonomyRef: JSON.parse(row.taxonomy_json) as TaxonomyReference,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function speciesListEntryFromRow(row: SpeciesListEntryRow): SpeciesListEntry {
+  return {
+    id: row.id,
+    speciesListId: row.species_list_id,
+    speciesKey: row.species_key,
+    species: JSON.parse(row.species_json) as SpeciesSnapshot,
+    createdAt: row.created_at,
   };
 }
 
@@ -1031,6 +1552,14 @@ function optionalText(value: string): string | undefined {
   return trimmed || undefined;
 }
 
+function taxonomyReference(taxonomy: TaxonomyReference): TaxonomyReference {
+  return {
+    packageId: taxonomy.packageId,
+    name: taxonomy.name,
+    version: taxonomy.version,
+  };
+}
+
 type SurveyRow = {
   id: string;
   title: string;
@@ -1043,10 +1572,28 @@ type SurveyRow = {
   region_source: string;
   region_source_version: string;
   taxonomy_json: string | null;
+  species_list_id: string | null;
   survey_date: string;
   status: "active" | "archived";
   created_at: string;
   updated_at: string;
+};
+
+type SpeciesListRow = {
+  id: string;
+  name: string;
+  taxonomy_json: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type SpeciesListEntryRow = {
+  id: string;
+  species_list_id: string;
+  species_key: string;
+  taxon_id: string | null;
+  species_json: string;
+  created_at: string;
 };
 
 type LocaleRow = {

@@ -15,6 +15,7 @@ const validDraft: ObservationDraft = {
   unit: "",
   publicComment: "",
   additionalObservers: "",
+  addToSpeciesList: false,
 };
 
 describe("observation validation", () => {

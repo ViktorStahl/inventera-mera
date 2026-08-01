@@ -22,6 +22,7 @@ export type Survey = {
   description?: string;
   region: Region;
   taxonomyRef?: TaxonomyReference;
+  speciesListId?: string;
   surveyDate: string;
   status: SurveyStatus;
   createdAt: string;
@@ -81,11 +82,38 @@ export type LocaleListItem = SurveyLocale & { observationCount: number };
 
 export type Taxon = {
   id: string;
+  source?: "taxonomy" | "free-text";
   preferredName: string;
   scientificName: string;
   synonyms: string[];
   rank: string;
   status: string;
+  inSpeciesList?: boolean;
+  speciesListEntryId?: string;
+  taxonomyPackageId?: string;
+  taxonomyVersion?: string;
+};
+
+export type SpeciesList = {
+  id: string;
+  name: string;
+  taxonomyRef: TaxonomyReference;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SpeciesListEntry = {
+  id: string;
+  speciesListId: string;
+  speciesKey: string;
+  species: SpeciesSnapshot;
+  createdAt: string;
+};
+
+export type SpeciesListSummary = SpeciesList & { speciesCount: number };
+
+export type AppSettings = {
+  defaultTaxonomyPackageId: string;
 };
 
 export type SurveyDraft = {
@@ -95,6 +123,8 @@ export type SurveyDraft = {
   countyCode: string;
   municipalityCode: string;
   regionFreeText: string;
+  taxonomyPackageId: string;
+  speciesListId: string;
 };
 
 export type LocaleDraft = {
@@ -127,13 +157,18 @@ export type ObservationDraft = {
   unit: string;
   publicComment: string;
   additionalObservers: string;
+  addToSpeciesList: boolean;
 };
 
 export type SurveyBackup = {
   format: "inventera-mera-backup";
-  formatVersion: 2;
+  formatVersion: 3;
   exportedAt: string;
   survey: Survey;
   locales: SurveyLocale[];
   observations: Observation[];
+  speciesList?: {
+    list: SpeciesList;
+    entries: SpeciesListEntry[];
+  };
 };

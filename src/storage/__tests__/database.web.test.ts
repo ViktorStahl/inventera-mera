@@ -1,4 +1,6 @@
 import type { Observation, Region, SurveyDraft, SurveyLocale } from "@/domain/models";
+import { VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
+import { taxonomySpeciesSnapshot } from "@/domain/species";
 import * as repository from "../database.web";
 
 let mockNextId = 0;
@@ -24,6 +26,29 @@ describe("browser storage", () => {
       drafts: { "observation:new:legacy": { localityName: "Gammalt utkast" } },
     }));
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    const speciesList = await repository.createSpeciesList("Fjällväxter", VASCULAR_PLANTS_TAXONOMY);
+    const listTaxon = (await repository.searchTaxa("ängskovall"))[0]!;
+    await repository.addSpeciesToList(
+      speciesList.id,
+      taxonomySpeciesSnapshot(listTaxon, VASCULAR_PLANTS_TAXONOMY),
+    );
+    const prioritized = await repository.searchTaxa("äng", 20, speciesList.id);
+    expect(prioritized[0]).toMatchObject({ id: listTaxon.id, inSpeciesList: true });
+    await repository.addSpeciesToList(speciesList.id, {
+      source: "taxonomy",
+      enteredName: "Okänd fjällväxt",
+      taxonId: "not-in-active-starter-package",
+      preferredName: "Okänd fjällväxt",
+      scientificName: "Planta incognita",
+      taxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId,
+      taxonomyVersion: "äldre-version",
+    });
+    expect((await repository.searchTaxa("okänd", 20, speciesList.id))[0]).toMatchObject({
+      id: "not-in-active-starter-package",
+      taxonomyVersion: "äldre-version",
+      inSpeciesList: true,
+    });
+
     const draft: SurveyDraft = {
       title: "Ängsmark",
       description: "",
@@ -31,6 +56,8 @@ describe("browser storage", () => {
       countyCode: "14",
       municipalityCode: "1480",
       regionFreeText: "Lillåsen",
+      taxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId,
+      speciesListId: speciesList.id,
     };
     const region: Region = {
       countyCode: "14",
@@ -82,8 +109,14 @@ describe("browser storage", () => {
       publicComment: "Första kommentaren",
       additionalObservers: ["Ada"],
     };
-    const inherited = await repository.createObservation(inheritedInput);
+    const inherited = await repository.createObservation(inheritedInput, speciesList.id);
     expect(await repository.getObservation(survey.id, inherited.id)).toEqual(inherited);
+    expect(await repository.speciesListContains(speciesList.id, inherited.species)).toBe(true);
+    expect((await repository.searchTaxa("testväxt", 20, speciesList.id))[0]).toMatchObject({
+      source: "free-text",
+      preferredName: "Testväxt",
+      inSpeciesList: true,
+    });
 
     const override = await repository.createObservation({
       ...inheritedInput,
@@ -123,15 +156,41 @@ describe("browser storage", () => {
     expect(await repository.loadDraft(repository.observationEditDraftKey(survey.id, locale.id, override.id))).toBeNull();
 
     const backup = await repository.buildSurveyBackup(survey.id);
-    expect(backup).toMatchObject({ formatVersion: 2, locales: [{ id: locale.id }] });
+    expect(backup).toMatchObject({
+      formatVersion: 3,
+      locales: [{ id: locale.id }],
+      speciesList: { list: { id: speciesList.id }, entries: expect.any(Array) },
+    });
     expect(backup.locales[0]).not.toHaveProperty("observationCount");
+    const firstBackedUpEntry = backup.speciesList?.entries[0];
+    expect(firstBackedUpEntry).toBeDefined();
+    await expect(repository.restoreSurveyBackup({
+      ...backup,
+      speciesList: {
+        ...backup.speciesList,
+        entries: [{ ...firstBackedUpEntry, speciesKey: "manipulerad-identitet" }],
+      },
+    })).rejects.toThrow("ogiltiga poster");
+    await repository.addSpeciesToList(speciesList.id, {
+      source: "free-text",
+      enteredName: "Tillagd efter backup",
+    });
 
     await repository.deleteLocale(survey.id, locale.id);
     expect(await repository.getLocale(survey.id, locale.id)).toBeNull();
     expect(await repository.listObservations(survey.id)).toEqual([]);
 
     expect(await repository.restoreSurveyBackup(backup)).toBe(survey.id);
+    expect(
+      await repository.speciesListContains(speciesList.id, {
+        source: "free-text",
+        enteredName: "Tillagd efter backup",
+      }),
+    ).toBe(true);
     expect(await repository.listLocales(survey.id)).toHaveLength(1);
+    expect(await repository.listObservations(survey.id)).toHaveLength(2);
+    await repository.deleteSpeciesList(speciesList.id);
+    expect((await repository.getSurvey(survey.id))?.speciesListId).toBeUndefined();
     expect(await repository.listObservations(survey.id)).toHaveLength(2);
     await repository.saveDraft(repository.observationDraftKey(survey.id, locale.id), { speciesQuery: "Ny" });
     await repository.deleteSurvey(survey.id);

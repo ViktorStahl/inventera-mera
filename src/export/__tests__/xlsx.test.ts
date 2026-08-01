@@ -1,6 +1,6 @@
 import { strFromU8, unzipSync } from "fflate";
 
-import type { Observation, Survey, SurveyLocale } from "@/domain/models";
+import type { Observation, SpeciesList, Survey, SurveyLocale } from "@/domain/models";
 import { createSurveyWorkbook, sanitizeFileName } from "../xlsx";
 
 const survey: Survey = {
@@ -55,6 +55,14 @@ const observation: Observation = {
   updatedAt: "2026-07-31T08:14:00.000Z",
 };
 
+const speciesList: SpeciesList = {
+  id: "list-1",
+  name: "Fjällväxter",
+  taxonomyRef: survey.taxonomyRef!,
+  createdAt: survey.createdAt,
+  updatedAt: survey.updatedAt,
+};
+
 describe("Excel export", () => {
   it("emits a locale sheet and the exact mandatory Swedish observation headers", () => {
     const files = unzipSync(createSurveyWorkbook(survey, [locale], [observation]));
@@ -77,6 +85,13 @@ describe("Excel export", () => {
     const sheet = strFromU8(files["xl/worksheets/sheet3.xml"]!);
     expect(sheet).toContain(">Antal</t>");
     expect(sheet).toContain(">Enhet</t>");
+  });
+
+  it("includes the selected species list in survey metadata", () => {
+    const files = unzipSync(createSurveyWorkbook(survey, [locale], [observation], speciesList));
+    const sheet = strFromU8(files["xl/worksheets/sheet1.xml"]!);
+    expect(sheet).toContain(">Artlista</t>");
+    expect(sheet).toContain(">Fjällväxter</t>");
   });
 
   it("sanitizes unsafe file names", () => {

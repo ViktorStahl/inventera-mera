@@ -15,7 +15,8 @@ the current Android Gradle Plugin 8.12 declares JDK 17 as its default.
 The repository contains a working local-only MVP for the requested core flow:
 survey list/search/create/open, locale creation, observations within locales,
 draft recovery, SCB county/municipality selection, offline starter-taxonomy
-search with free text, RT90 input and device-position conversion, map filtering,
+search with free text, reusable species lists with list-first suggestions and a
+default-taxonomy setting, RT90 input and device-position conversion, map filtering,
 Excel export, JSON backup/restore, and offline editing and permanent deletion of
 surveys, locales, and observations. Data is persisted in SQLite on native
 devices and in origin-scoped browser storage in the web preview. Deletion
@@ -85,7 +86,8 @@ independent of platform views where practical.
 - Background cloud synchronization. The local data model will be sync-ready,
   but sync is a separately designed feature.
 - Navigation, routing, tracks, polygons, or line observations.
-- A general taxonomy editor. Custom taxonomies are imported as versioned lists.
+- A general taxonomy editor. Custom taxonomies are imported as versioned
+  packages; they are distinct from user-maintained species lists.
 
 ### Confirmed product decisions
 
@@ -99,6 +101,20 @@ independent of platform views where practical.
 - All taxonomic ranks/statuses within the selected taxonomy group are
   selectable for now. Rank and status remain visible so users can judge the
   suggestion.
+- Every survey has one selected taxonomy and may reference one reusable species
+  list (`artlista`) built against that taxonomy. A new list is empty. Lists may
+  contain taxonomy-backed snapshots and free-text species, can be renamed, and
+  can have entries added or removed independently of observations.
+- Species suggestions are ranked in two strict groups: closest matching entries
+  in the survey's species list first, followed by closest matching entries in
+  the rest of the selected taxonomy. When saving an observation, the user may
+  add its species snapshot to the survey's current list in the same local
+  transaction. Duplicate list entries are ignored by normalized identity.
+- The app setting `default taxonomy` supplies the initial selection for new
+  surveys and species lists. Changing it never changes existing surveys, lists,
+  or observation snapshots. The installed MVP choice is the vascular-plant
+  starter package; the production package will contain the complete configured
+  vascular-plant subtree, including its species and subspecies.
 - The MVP basemap uses Lantmäteriet's downloadable raster topographic map.
 - The field hierarchy is Survey → Locale → Observation. A locale has a required
   name, time, and coordinate plus an optional note.
@@ -117,6 +133,9 @@ independent of platform views where practical.
   locale's defaults and differing later values become explicit overrides.
   Existing v1 form drafts are deliberately deleted rather than recovered,
   because their shape is incompatible with the locale workflow.
+- SQLite schema v3 adds species lists, list entries, a nullable survey/list
+  relation, and application settings. Deleting a list deletes its entries and
+  detaches it from surveys; it never deletes or rewrites observations.
 
 ## 3. Primary user and core journeys
 
@@ -128,8 +147,9 @@ drafts over dense desktop controls.
 ### 3.1 Prepare before going offline
 
 1. Install and open the mobile application.
-2. Download the vascular-plant taxonomy or import a custom taxonomy.
-3. Create a survey and choose its region and taxonomy.
+2. Download the vascular-plant taxonomy or import a custom taxonomy; optionally
+   prepare a reusable species list.
+3. Create a survey and choose its region, taxonomy, and optional species list.
 4. Optionally download a map package covering the field area.
 5. See an explicit `Ready offline` status for the app, taxonomy, survey, and
    optional map package.
@@ -143,9 +163,10 @@ drafts over dense desktop controls.
    reported accuracy, and transforms them locally to RT90.
 4. Search downloaded species names, select a suggestion, or add the typed name
    as free text.
-5. Optionally enter amount with unit, a public comment, and additional
+5. If the survey uses a species list, optionally add the observed species to it.
+6. Optionally enter amount with unit, a public comment, and additional
    observers, then save.
-6. The observation appears immediately in the locale list and survey map with a `Saved on
+7. The observation appears immediately in the locale list and survey map with a `Saved on
    this device` confirmation.
 
 ### 3.3 Review and export
@@ -160,7 +181,7 @@ drafts over dense desktop controls.
 | Route | Screen | Purpose |
 | --- | --- | --- |
 | `/surveys` | Survey list | Search and open surveys; show count and date |
-| `/surveys/new` | Create survey | Define title, description, region, taxonomy |
+| `/surveys/new` | Create survey | Define title, description, region, taxonomy, and optional species list |
 | `/surveys/:surveyId` | Survey detail | Locale list and survey summary |
 | `/surveys/:surveyId/locales/new` | Add locale | Capture locale name, time, coordinate, and note |
 | `/surveys/:surveyId/locales/:localeId` | Locale detail | Observation list and locale summary |
@@ -169,8 +190,12 @@ drafts over dense desktop controls.
 | `/surveys/:surveyId/map` | Survey map | Filter by locale/species/date and view markers |
 | `/surveys/:surveyId/observations/:observationId` | Observation detail/edit | Review and change an observation |
 | `/species/select` | Species picker | Search the active taxonomy or use free text |
+| `/species-lists` | Species lists | Search, open, and create reusable species lists |
+| `/species-lists/new` | Create species list | Name an empty list and choose its taxonomy |
+| `/species-lists/:listId` | Species list detail | Rename the list and remove entries |
+| `/species-lists/:listId/add` | Add list entries | Add taxonomy matches or free-text species |
 | `/taxonomies` | Offline taxonomies | Download, import, update, and remove packages |
-| `/settings` | Settings and data | Language, map source, backup/restore, storage |
+| `/settings` | Settings | Choose the default taxonomy; later language/map/storage settings |
 
 Navigation uses typed Expo Router routes and supports platform deep links where
 useful. Unsaved form state must survive an application background/termination
@@ -201,7 +226,11 @@ the locale twice.
 
 - Required: title and a county or municipality.
 - Optional: description.
-- Taxonomy: one downloaded Dyntaxa/custom package, or `No taxonomy`.
+- Taxonomy: one downloaded Dyntaxa/custom package. It defaults from application
+  settings and is required for a new survey.
+- Species list: optional and limited to lists built against the chosen
+  taxonomy. The form can create and select a new empty list without discarding
+  other survey fields. Changing taxonomy clears an incompatible list choice.
 - A taxonomy that is not present locally cannot be chosen for offline use; the
   screen offers a download/import action without losing entered form values.
 - The region picker searches the current, bundled SCB county/municipality list
@@ -214,7 +243,8 @@ the locale twice.
 ### 5.3 Open survey
 
 - App bar contains back, survey title, and an overflow menu.
-- Summary shows survey date, taxonomy name/version, region, and offline status.
+- Summary shows survey date, taxonomy name/version, selected species-list name
+  (or `Ingen`), region, and offline status.
 - Tabs are `Locales (n)` and `Map`; they remain reachable with screen
   readers and preserve scroll/viewport state when switching.
 - Each locale row shows name, date/time, and observation count. Opening a locale
@@ -244,12 +274,15 @@ Fields, in order:
    `Northing (X)` and `Easting (Y)`, both in metres.
 4. Location accuracy in metres, read-only when supplied by device GPS.
 5. Species, required, either a selected taxon or free text.
-6. Amount, optional non-negative number. If present, unit is required. Suggested
+6. When the survey has a species list, an optional control to add the current
+   taxonomy/free-text species to that list as part of save. It is omitted when
+   the normalized species identity is already present.
+7. Amount, optional non-negative number. If present, unit is required. Suggested
    units include `individer`, `stjälkar`, `tuvor` and `täckning`, while custom
    unit text remains allowed.
-7. Public comment (`Publik kommentar`), optional multiline plain text. Make its
+8. Public comment (`Publik kommentar`), optional multiline plain text. Make its
    exported/public character clear in the label.
-8. Additional observers (`Med-observatör`), optional repeatable names. Trim
+9. Additional observers (`Med-observatör`), optional repeatable names. Trim
    names, preserve spelling and ordering, and prevent empty entries.
 
 Defaulting runs only when creating a genuinely new blank form. A restored v2
@@ -271,6 +304,10 @@ delete action is only shown when editing an existing observation.
   imported custom aliases, case- and accent-insensitively.
 - Suggestions appear after one character, ordered by exact prefix, word prefix,
   substring, then synonym match. Deterministic alphabetical order breaks ties.
+- If the survey has a species list, matching list entries form the first result
+  group and matching taxonomy entries not in the list form the second. Match
+  quality orders results within each group. Both taxonomy-backed and free-text
+  list entries participate; taxonomy identities are de-duplicated.
 - Results show preferred name, scientific name, and a clear synonym/status
   indication when applicable.
 - Limit the first result set (for example, 30 rows) and virtualize longer lists.
@@ -341,6 +378,7 @@ type Survey = {
     name: string;
     version: string;
   };
+  speciesListId?: string;
   surveyDate: string; // YYYY-MM-DD; defaults to creation date
   status: "active" | "archived";
   createdAt: string;
@@ -457,7 +495,37 @@ type TaxonSearchEntry = {
 };
 ```
 
-### 6.5 Local operation metadata
+### 6.5 Species list and application settings
+
+```ts
+type SpeciesList = {
+  id: string;
+  name: string;
+  taxonomyRef: TaxonomyReference;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type SpeciesListEntry = {
+  id: string;
+  speciesListId: string;
+  speciesKey: string; // package+taxon ID, or normalized free-text identity
+  species: SpeciesSnapshot;
+  createdAt: string;
+};
+
+type AppSettings = {
+  defaultTaxonomyPackageId: string;
+};
+```
+
+`(speciesListId, speciesKey)` is unique. Species snapshots in lists have the
+same historical/provenance semantics as observation snapshots. A list belongs
+to exactly one taxonomy package; free-text entries remain allowed. A list may
+be shared by several surveys and changes are immediately reflected in future
+suggestions for all of them.
+
+### 6.6 Local operation metadata
 
 Records should include a monotonic local revision and tombstones for deleted
 records so a later sync feature can be added without changing field-data
@@ -575,11 +643,11 @@ document intentionally does not pin versions.
 | Data | Storage | Strategy |
 | --- | --- | --- |
 | Application code/static assets | Native application bundle | Versioned release or controlled Expo Update |
-| Surveys/locales/observations/drafts | Application SQLite database | Local source of truth, transactions, backed up |
+| Surveys/locales/observations/species lists/settings/drafts | Application SQLite database | Local source of truth, transactions, backed up |
 | Taxonomy metadata | Application SQLite database | Active-version pointer and provenance |
 | Taxonomy packages | Application document directory as SQLite files | Staged, checksum verified, atomically activated |
 | Map regions | MapLibre Native offline storage | User initiated, bounded, provider-authorized |
-| Small UI preferences | Async key/value settings | Non-critical only; never survey data |
+| Future non-domain UI preferences | Async key/value settings | Non-critical only; never survey data |
 | Tokens/credentials for future sync | SecureStore/Keychain/Keystore | Small secrets only |
 
 Before large downloads, check available disk space and package size. Never
@@ -618,6 +686,14 @@ user confirmation before removing downloaded data.
   as described in Confirmed product decisions. It clears all v1 drafts. This is
   an intentional one-time exception to draft recovery, approved because the old
   form has no locale identity or independent override semantics.
+- The schema v2 → v3 migration preserves field records and adds `species_lists`,
+  `species_list_entries`, `surveys.species_list_id`, and the singleton
+  `app_settings` row. Old observation drafts default the new add-to-list flag to
+  false; an existing user edit is never overwritten.
+- JSON backup format v3 includes the survey's currently selected species list
+  and all of its entries. Restore validates the relation and taxonomy. If the
+  same shared list already exists locally, restore merges missing entries
+  without deleting newer local entries.
 
 ## 10. Map-source strategy
 
@@ -688,6 +764,7 @@ or document directory, without uploading data. The workbook contains:
 | Region | County and optional municipality/free-text area, with SCB codes |
 | Survey date | ISO date |
 | Taxonomy | Name, source, and version |
+| Species list | Selected list name, or `Ingen` |
 | Locale count | Integer |
 | Observation count | Integer |
 | Exported at | ISO timestamp with offset |
@@ -768,7 +845,9 @@ explicit backups.
 
 ## 14. Error and edge-case behaviour
 
-- **No taxonomy:** free-text species entry remains available.
+- **Taxonomy unavailable:** an existing observation can still retain its saved
+  snapshot, but a new survey must choose an installed taxonomy; free-text
+  observation entry remains available within that survey.
 - **Taxonomy download interrupted:** keep the old version; delete staging data;
   offer retry.
 - **Taxon renamed/removed:** existing observation snapshots do not change; new
@@ -797,6 +876,8 @@ explicit backups.
   drafts, and clearing incompatible v1 drafts.
 - Coordinate control points, bounds, axis order, and round trips.
 - Taxonomy normalization/ranking and CSV import validation.
+- Species-list identity, list-first ranking, shared-list deletion, schema v3,
+  and backup merge behaviour.
 - File-name/cell sanitization and workbook column mapping.
 - Date/time-zone and daylight-saving boundaries.
 
@@ -812,7 +893,7 @@ explicit backups.
 1. Install the release-like build, go offline, create a survey and locale, add a
    GPS/manual observation, terminate/relaunch the app, and verify persistence.
 2. Download a taxonomy, go offline, find by Swedish/scientific/synonym name, and
-   save; also save unmatched free text.
+   save; also save unmatched free text and add both kinds to a species list.
 3. Interrupt taxonomy/map download and verify existing data still works.
 4. Create locales and observations, filter markers by locale/species offline,
    edit inherited and overridden values, and export.

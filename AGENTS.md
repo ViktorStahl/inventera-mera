@@ -27,6 +27,12 @@ behaviour, architecture, and acceptance criteria.
   taxonomy ID. Taxonomy updates must not rewrite historical observations.
 - Free-text species are a first-class supported case, not an error or fallback
   that blocks saving.
+- A survey may use one species list compatible with its taxonomy. Search must
+  rank closest list matches before closest non-list taxonomy matches, including
+  free-text list entries. Adding the observed species to the current list and
+  saving the observation must be one offline repository operation.
+- The default taxonomy setting only initializes new surveys and species lists;
+  never use it to rewrite an existing selection or species snapshot.
 - Preserve the Swedish Excel interchange contract in `DESIGN.md`. In
   particular, never export `Antal` without `Enhet`, and keep the mandatory
   column names exact.

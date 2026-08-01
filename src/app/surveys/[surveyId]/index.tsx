@@ -2,11 +2,11 @@ import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-rou
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
 
-import type { LocaleListItem, Survey } from "@/domain/models";
+import type { LocaleListItem, SpeciesList, Survey } from "@/domain/models";
 import { localDateFromIso, localTimeFromIso } from "@/domain/time";
 import { shareSurveyBackup, shareSurveyExcel } from "@/export/files";
 import { dismissToSurveyList } from "@/navigation/hierarchy";
-import { buildSurveyBackup, deleteSurvey, getSurvey, listLocales } from "@/storage/database";
+import { buildSurveyBackup, deleteSurvey, getSpeciesList, getSurvey, listLocales } from "@/storage/database";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
 import { confirmDestructive } from "@/ui/confirm";
@@ -19,6 +19,7 @@ export default function SurveyDetailScreen() {
   const { surveyId } = useLocalSearchParams<{ surveyId: string }>();
   const router = useRouter();
   const [survey, setSurvey] = useState<Survey>();
+  const [speciesList, setSpeciesList] = useState<SpeciesList>();
   const [locales, setLocales] = useState<LocaleListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<"excel" | "json">();
@@ -34,6 +35,9 @@ export default function SurveyDetailScreen() {
       ]);
       if (!loadedSurvey) throw new Error("Inventeringen kunde inte hittas.");
       setSurvey(loadedSurvey);
+      setSpeciesList(loadedSurvey.speciesListId
+        ? ((await getSpeciesList(loadedSurvey.speciesListId)) ?? undefined)
+        : undefined);
       setLocales(loadedLocales);
     } catch (error) {
       Alert.alert("Kunde inte öppna inventeringen", messageOf(error));
@@ -108,6 +112,7 @@ export default function SurveyDetailScreen() {
           {survey.region.freeText ? ` · ${survey.region.freeText}` : ""}
         </Text>
         <Text style={styles.meta}>♧ {survey.taxonomyRef?.name ?? "Fritext"}</Text>
+        <Text style={styles.meta}>☷ Artlista: {speciesList?.name ?? "Ingen"}</Text>
       </Card>
       <View style={styles.tabs} accessibilityRole="tablist">
         <View style={[styles.tab, styles.activeTab]} accessibilityRole="tab" accessibilityState={{ selected: true }}>

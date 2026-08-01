@@ -21,12 +21,17 @@ Read [DESIGN.md](./DESIGN.md) for the product and architecture contract and
 - Transform GPS coordinates locally with Lantmäteriet's national RT90 direct
   projection and verify it against their published control example.
 - Small offline vascular-plant starter taxonomy plus unrestricted free text.
+- Reusable offline species lists: create/rename/delete lists, add/remove
+  taxonomy or free-text species, attach a list to a survey, and rank matching
+  list entries before the rest of the taxonomy.
+- Configurable default taxonomy for new surveys and species lists.
 - SQLite persistence, observation-form draft recovery, and local-only data.
 - MapLibre map markers when a map style is configured, plus an always-available
   marker-only offline fallback and local species/locale/date filters.
 - Exact Swedish Excel observation interchange columns with conditional `Antal`
   + `Enhet`, plus Survey and Locales sheets.
-- Lossless per-survey JSON backup and restore.
+- Lossless per-survey JSON backup and restore, including the selected species
+  list snapshot.
 
 ## Run in a browser
 
