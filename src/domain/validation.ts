@@ -1,4 +1,5 @@
 import type { LocaleDraft, ObservationDraft, SurveyDraft } from "./models";
+import { isObservationUnit } from "./amount";
 import { assertRt90 } from "./coordinates";
 
 export type ValidationErrors<T> = Partial<Record<keyof T | "general", string>>;
@@ -41,7 +42,8 @@ export function validateObservationDraft(
     if (!Number.isFinite(amount) || amount < 0) {
       errors.amount = "Antal måste vara noll eller större.";
     }
-    if (!draft.unit.trim()) errors.unit = "Enhet krävs när antal anges.";
+    if (!draft.unit) errors.unit = "Enhet krävs när antal anges.";
+    else if (!isObservationUnit(draft.unit)) errors.unit = "Välj en enhet i listan.";
   }
   if (draft.accuracyMeters.trim()) {
     const accuracy = Number(draft.accuracyMeters.replace(",", "."));

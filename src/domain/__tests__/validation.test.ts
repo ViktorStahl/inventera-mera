@@ -25,8 +25,17 @@ describe("observation validation", () => {
   });
 
   it("accepts zero with a unit", () => {
-    const errors = validateObservationDraft({ ...validDraft, amount: "0", unit: "individer" });
+    const errors = validateObservationDraft({ ...validDraft, amount: "0", unit: "m2" });
     expect(errors).toEqual({});
+  });
+
+  it("rejects a unit outside the fixed list", () => {
+    const errors = validateObservationDraft({
+      ...validDraft,
+      amount: "12",
+      unit: "individer" as never,
+    });
+    expect(errors.unit).toBe("Välj en enhet i listan.");
   });
 
   it("rejects calendar rollover dates and out-of-range times", () => {

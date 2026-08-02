@@ -20,12 +20,17 @@ describe("browser storage", () => {
   it("persists the survey-locale-observation hierarchy and resolves live inheritance offline", async () => {
     const storage = new MemoryStorage();
     storage.setItem("inventera-mera:web:v1", JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 3,
       surveys: [],
-      observations: [],
-      drafts: { "observation:new:legacy": { localityName: "Gammalt utkast" } },
+      locales: [],
+      observations: [{ id: "ogiltig", amount: { value: 1, unit: "individer" } }],
+      speciesLists: [],
+      speciesListEntries: [],
+      settings: { defaultTaxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId },
+      drafts: { "observation:new:legacy": { amount: "1", unit: "individer" } },
     }));
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    expect((await repository.getDatabase()).observations).toEqual([]);
     const speciesList = await repository.createSpeciesList("Fjällväxter", VASCULAR_PLANTS_TAXONOMY);
     const listTaxon = (await repository.searchTaxa("ängskovall"))[0]!;
     await repository.addSpeciesToList(
@@ -109,7 +114,7 @@ describe("browser storage", () => {
       position: locale.position,
       positionOverridden: false,
       species: { source: "free-text", enteredName: "Testväxt" },
-      amount: { value: 2, unit: "individer" },
+      amount: { value: 2, unit: "stjälkar/strån/skott" },
       publicComment: "Första kommentaren",
       additionalObservers: ["Ada"],
     };
@@ -121,6 +126,12 @@ describe("browser storage", () => {
       preferredName: "Testväxt",
       inSpeciesList: true,
     });
+    await expect(
+      repository.createObservation({
+        ...inheritedInput,
+        amount: { value: 2, unit: "individer" },
+      } as unknown as typeof inheritedInput),
+    ).rejects.toThrow("tillåtna enheterna");
 
     const override = await repository.createObservation({
       ...inheritedInput,
@@ -192,6 +203,16 @@ describe("browser storage", () => {
       }),
     ).toBe(true);
     expect(await repository.listLocales(survey.id)).toHaveLength(1);
+    expect(await repository.listObservations(survey.id)).toHaveLength(2);
+    const invalidBackupObservation = {
+      ...backup.observations[0]!,
+      id: "observation-med-ogiltig-enhet",
+      amount: { value: 1, unit: "individer" },
+    };
+    await repository.restoreSurveyBackup({
+      ...backup,
+      observations: [...backup.observations, invalidBackupObservation],
+    });
     expect(await repository.listObservations(survey.id)).toHaveLength(2);
     await repository.deleteSpeciesList(speciesList.id);
     expect((await repository.getSurvey(survey.id))?.speciesListId).toBeUndefined();

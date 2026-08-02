@@ -3,6 +3,13 @@ import * as SQLite from "expo-sqlite";
 
 import taxonomyManifest from "@/data/generated/dyntaxaVascularPlants.manifest.json";
 import { findTaxonomy, VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
+import {
+  assertSupportedObservationAmount,
+  isObservationUnit,
+  isSupportedObservationAmount,
+  OBSERVATION_UNITS,
+  type ObservationAmount,
+} from "@/domain/amount";
 import type {
   AppSettings,
   LocaleListItem,
@@ -55,7 +62,33 @@ async function openAndMigrate(): Promise<SQLite.SQLiteDatabase> {
   if (version < 1) await migrateToVersionOne(database);
   if (version < 2) await migrateToVersionTwo(database);
   if (version < 3) await migrateToVersionThree(database);
+  await deleteUnsupportedAmountData(database);
   return database;
+}
+
+async function deleteUnsupportedAmountData(
+  database: SQLite.SQLiteDatabase,
+): Promise<void> {
+  await database.withTransactionAsync(async () => {
+    const placeholders = OBSERVATION_UNITS.map(() => "?").join(", ");
+    await database.runAsync(
+      `DELETE FROM observations
+       WHERE (amount_value IS NULL AND amount_unit IS NOT NULL)
+          OR (amount_value IS NOT NULL AND amount_unit IS NULL)
+          OR amount_value < 0
+          OR amount_unit NOT IN (${placeholders})`,
+      ...OBSERVATION_UNITS,
+    );
+
+    const drafts = await database.getAllAsync<DraftRow>(
+      `SELECT key, value_json FROM drafts
+       WHERE key LIKE 'observation:new:%' OR key LIKE 'observation:edit:%'`,
+    );
+    for (const draft of drafts) {
+      if (observationDraftHasSupportedUnit(draft.value_json)) continue;
+      await database.runAsync("DELETE FROM drafts WHERE key = ?", draft.key);
+    }
+  });
 }
 
 async function getTaxonomyDatabase(): Promise<SQLite.SQLiteDatabase> {
@@ -163,7 +196,7 @@ async function migrateToVersionTwo(database: SQLite.SQLiteDatabase): Promise<voi
       "SELECT * FROM observations ORDER BY created_at ASC",
     );
     const migrated = migrateLegacyObservations(
-      legacyRows.map(legacyObservationFromRow),
+      legacyRows.filter(rowHasSupportedAmount).map(legacyObservationFromRow),
       () => Crypto.randomUUID(),
     );
 
@@ -751,6 +784,7 @@ export async function createObservation(
   input: ObservationInput,
   addToSpeciesListId?: string,
 ): Promise<Observation> {
+  assertSupportedObservationAmount(input.amount);
   const database = await getDatabase();
   const [locale, speciesList] = await Promise.all([
     getLocale(input.surveyId, input.localeId),
@@ -789,6 +823,7 @@ export async function updateObservation(
   input: ObservationInput,
   addToSpeciesListId?: string,
 ): Promise<Observation> {
+  assertSupportedObservationAmount(input.amount);
   const database = await getDatabase();
   const [existing, locale, speciesList] = await Promise.all([
     getObservation(input.surveyId, observationId),
@@ -1096,7 +1131,9 @@ function normalizeBackup(value: unknown): SurveyBackup {
   const survey = backup.survey as Survey;
   if (backup.formatVersion === 1 && Array.isArray(backup.observations)) {
     const migrated = migrateLegacyObservations(
-      backup.observations as LegacyObservation[],
+      (backup.observations as LegacyObservation[]).filter((observation) =>
+        isSupportedObservationAmount(observation.amount),
+      ),
       () => Crypto.randomUUID(),
     );
     return {
@@ -1121,7 +1158,9 @@ function normalizeBackup(value: unknown): SurveyBackup {
         typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString(),
       survey,
       locales: backup.locales as SurveyLocale[],
-      observations: backup.observations as Observation[],
+      observations: (backup.observations as Observation[]).filter((observation) =>
+        isSupportedObservationAmount(observation.amount),
+      ),
     };
   }
   if (
@@ -1179,7 +1218,12 @@ function normalizeBackup(value: unknown): SurveyBackup {
       throw new Error("Backupen innehåller ogiltiga poster i artlistan.");
     }
   }
-  return normalized;
+  return {
+    ...normalized,
+    observations: normalized.observations.filter((observation) =>
+      isSupportedObservationAmount(observation.amount),
+    ),
+  };
 }
 
 async function assertSurveySpeciesList(
@@ -1501,10 +1545,7 @@ function observationFromRow(row: ObservationRow): Observation {
     timeOverridden: row.observed_at_override != null,
     positionOverridden: row.position_source_override != null,
     species: JSON.parse(row.species_json) as SpeciesSnapshot,
-    amount:
-      row.amount_value == null || row.amount_unit == null
-        ? undefined
-        : { value: row.amount_value, unit: row.amount_unit },
+    amount: amountFromValues(row.amount_value, row.amount_unit),
     publicComment: row.public_comment ?? undefined,
     additionalObservers: JSON.parse(row.additional_observers_json) as string[],
     createdAt: row.created_at,
@@ -1528,10 +1569,7 @@ function legacyObservationFromRow(row: LegacyObservationRow): LegacyObservation 
       row.position_source,
     ),
     species: JSON.parse(row.species_json) as SpeciesSnapshot,
-    amount:
-      row.amount_value == null || row.amount_unit == null
-        ? undefined
-        : { value: row.amount_value, unit: row.amount_unit },
+    amount: amountFromValues(row.amount_value, row.amount_unit),
     publicComment: row.public_comment ?? undefined,
     additionalObservers: JSON.parse(row.additional_observers_json) as string[],
     createdAt: row.created_at,
@@ -1553,6 +1591,40 @@ function positionFromValues(
     accuracyMeters: accuracy ?? undefined,
     source,
   };
+}
+
+function rowHasSupportedAmount(row: {
+  amount_value: number | null;
+  amount_unit: string | null;
+}): boolean {
+  if (row.amount_value == null && row.amount_unit == null) return true;
+  return isSupportedObservationAmount({
+    value: row.amount_value,
+    unit: row.amount_unit,
+  });
+}
+
+function amountFromValues(
+  value: number | null,
+  unit: string | null,
+): ObservationAmount | undefined {
+  if (value == null && unit == null) return undefined;
+  const amount = { value, unit };
+  if (!isSupportedObservationAmount(amount)) {
+    throw new Error("Observationen har en enhet som inte stöds.");
+  }
+  return amount;
+}
+
+function observationDraftHasSupportedUnit(valueJson: string): boolean {
+  try {
+    const value = JSON.parse(valueJson) as unknown;
+    if (!value || typeof value !== "object") return false;
+    const unit = (value as { unit?: unknown }).unit;
+    return unit === undefined || unit === "" || isObservationUnit(unit);
+  } catch {
+    return false;
+  }
 }
 
 function optionalText(value: string): string | undefined {
@@ -1679,4 +1751,9 @@ type TaxonRow = {
 type TaxonomyManifestRow = {
   key: string;
   value: string;
+};
+
+type DraftRow = {
+  key: string;
+  value_json: string;
 };

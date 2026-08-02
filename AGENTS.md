@@ -36,6 +36,10 @@ behaviour, architecture, and acceptance criteria.
 - Preserve the Swedish Excel interchange contract in `DESIGN.md`. In
   particular, never export `Antal` without `Enhet`, and keep the mandatory
   column names exact.
+- Amount units are restricted to `stjälkar/strån/skott`, `plantor/tuvor`, `m2`,
+  `dm2`, and `cm2`; never offer or persist custom units. This rule intentionally
+  uses startup cleanup rather than a new schema migration, as documented in
+  `DESIGN.md`.
 - Preserve the Survey → Locale → Observation hierarchy. `Lokalnamn` is the
   required owning locale's current name. Observations live-inherit locale time
   and position unless the respective value is explicitly overridden; never

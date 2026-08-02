@@ -2,6 +2,11 @@ import * as Crypto from "expo-crypto";
 
 import packagedTaxonomy from "@/data/generated/dyntaxaVascularPlants.json";
 import { findTaxonomy, VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
+import {
+  assertSupportedObservationAmount,
+  isObservationUnit,
+  isSupportedObservationAmount,
+} from "@/domain/amount";
 import type {
   AppSettings,
   LocaleListItem,
@@ -65,7 +70,7 @@ export async function getDatabase(): Promise<BrowserDatabase> {
   }
   try {
     const parsed = JSON.parse(stored) as unknown;
-    database = readOrMigrateDatabase(parsed);
+    database = deleteUnsupportedAmountData(readOrMigrateDatabase(parsed));
     persist(database);
     return database;
   } catch {
@@ -452,6 +457,7 @@ export async function createObservation(
   input: ObservationInput,
   addToSpeciesListId?: string,
 ): Promise<Observation> {
+  assertSupportedObservationAmount(input.amount);
   const state = await getDatabase();
   const locale = state.locales.find(
     (item) => item.id === input.localeId && item.surveyId === input.surveyId,
@@ -479,6 +485,7 @@ export async function updateObservation(
   input: ObservationInput,
   addToSpeciesListId?: string,
 ): Promise<Observation> {
+  assertSupportedObservationAmount(input.amount);
   const state = await getDatabase();
   const index = state.observations.findIndex((item) => item.id === observationId);
   const existing = state.observations[index];
@@ -801,7 +808,9 @@ function normalizeBackup(value: unknown): SurveyBackup {
   const survey = backup.survey as Survey;
   if (backup.formatVersion === 1 && Array.isArray(backup.observations)) {
     const migrated = migrateLegacyObservations(
-      backup.observations as LegacyObservation[],
+      (backup.observations as LegacyObservation[]).filter((observation) =>
+        isSupportedObservationAmount(observation.amount),
+      ),
       () => Crypto.randomUUID(),
     );
     return {
@@ -826,7 +835,9 @@ function normalizeBackup(value: unknown): SurveyBackup {
         typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString(),
       survey,
       locales: backup.locales as SurveyLocale[],
-      observations: backup.observations as Observation[],
+      observations: (backup.observations as Observation[]).filter((observation) =>
+        isSupportedObservationAmount(observation.amount),
+      ),
     };
   }
   if (
@@ -884,7 +895,33 @@ function normalizeBackup(value: unknown): SurveyBackup {
       throw new Error("Backupen innehåller ogiltiga poster i artlistan.");
     }
   }
-  return normalized;
+  return {
+    ...normalized,
+    observations: normalized.observations.filter((observation) =>
+      isSupportedObservationAmount(observation.amount),
+    ),
+  };
+}
+
+function deleteUnsupportedAmountData(state: BrowserDatabase): BrowserDatabase {
+  state.observations = state.observations.filter((observation) =>
+    isSupportedObservationAmount(observation.amount),
+  );
+  for (const [key, value] of Object.entries(state.drafts)) {
+    if (
+      (key.startsWith("observation:new:") || key.startsWith("observation:edit:")) &&
+      !observationDraftHasSupportedUnit(value)
+    ) {
+      delete state.drafts[key];
+    }
+  }
+  return state;
+}
+
+function observationDraftHasSupportedUnit(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const unit = (value as { unit?: unknown }).unit;
+  return unit === undefined || unit === "" || isObservationUnit(unit);
 }
 
 function deleteSurveyDrafts(state: BrowserDatabase, surveyId: string): void {

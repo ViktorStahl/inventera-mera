@@ -1,3 +1,5 @@
+import type { ObservationAmount, ObservationUnit } from "./amount";
+
 export type SurveyStatus = "active" | "archived";
 
 export type Region = {
@@ -69,7 +71,7 @@ export type Observation = {
   timeOverridden: boolean;
   positionOverridden: boolean;
   species: SpeciesSnapshot;
-  amount?: { value: number; unit: string };
+  amount?: ObservationAmount;
   publicComment?: string;
   additionalObservers: string[];
   createdAt: string;
@@ -154,7 +156,7 @@ export type ObservationDraft = {
   speciesQuery: string;
   selectedTaxon?: Taxon;
   amount: string;
-  unit: string;
+  unit: ObservationUnit | "";
   publicComment: string;
   additionalObservers: string;
   addToSpeciesList: boolean;

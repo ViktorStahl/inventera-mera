@@ -18,6 +18,8 @@ Read [DESIGN.md](./DESIGN.md) for the product and architecture contract and
 - Add, edit, and delete observations within a locale. Time and coordinate use
   live locale defaults and can be overridden independently; species, amount/unit,
   public comment, and additional observers remain observation fields.
+- Optional amounts use one fixed unit: `stjälkar/strån/skott`,
+  `plantor/tuvor`, `m2`, `dm2`, or `cm2`; custom units cannot be entered.
 - Transform GPS coordinates locally with Lantmäteriet's national RT90 direct
   projection and verify it against their published control example.
 - Bundled offline Dyntaxa taxonomy with 10,711 accepted vascular-plant species

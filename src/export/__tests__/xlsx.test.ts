@@ -80,11 +80,12 @@ describe("Excel export", () => {
   });
 
   it("includes both Antal and Enhet when any row has amount", () => {
-    const withAmount: Observation = { ...observation, amount: { value: 0, unit: "individer" } };
+    const withAmount: Observation = { ...observation, amount: { value: 0, unit: "plantor/tuvor" } };
     const files = unzipSync(createSurveyWorkbook(survey, [locale], [withAmount]));
     const sheet = strFromU8(files["xl/worksheets/sheet3.xml"]!);
     expect(sheet).toContain(">Antal</t>");
     expect(sheet).toContain(">Enhet</t>");
+    expect(sheet).toContain(">plantor/tuvor</t>");
   });
 
   it("includes the selected species list in survey metadata", () => {

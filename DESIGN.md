@@ -98,7 +98,9 @@ independent of platform views where practical.
   while Excel is the human/external-system export.
 - A survey region is selected from searchable Swedish counties and
   municipalities, with optional free text for a more specific area.
-- Amount is optional. When an amount is entered, a unit is required.
+- Amount is optional. When an amount is entered, a unit is required and must be
+  one of `stjälkar/strån/skott`, `plantor/tuvor`, `m2`, `dm2`, or `cm2`.
+  Custom unit text is not supported.
 - The bundled Dyntaxa taxonomy contains only accepted taxa with raw rank
   `species` or `subspecies` below the accepted `Tracheophyta` root. Non-accepted
   scientific names and alternative Swedish names are searchable aliases, not
@@ -278,9 +280,9 @@ Fields, in order:
 6. When the survey has a species list, an optional control to add the current
    taxonomy/free-text species to that list as part of save. It is omitted when
    the normalized species identity is already present.
-7. Amount, optional non-negative number. If present, unit is required. Suggested
-   units include `individer`, `stjälkar`, `tuvor` and `täckning`, while custom
-   unit text remains allowed.
+7. Amount, optional non-negative number. If present, unit is required and is
+   selected from exactly `stjälkar/strån/skott`, `plantor/tuvor`, `m2`, `dm2`,
+   or `cm2`. The control does not accept custom text.
 8. Public comment (`Publik kommentar`), optional multiline plain text. Make its
    exported/public character clear in the label.
 9. Additional observers (`Med-observatör`), optional repeatable names. Trim
@@ -443,7 +445,10 @@ type Observation = {
     taxonomyPackageId?: string;
     taxonomyVersion?: string;
   };
-  amount?: { value: number; unit: string };
+  amount?: {
+    value: number;
+    unit: "stjälkar/strån/skott" | "plantor/tuvor" | "m2" | "dm2" | "cm2";
+  };
   publicComment?: string;
   additionalObservers: string[];
   createdAt: string;
@@ -462,9 +467,9 @@ join the owning locale and return the effective values above. `localityName`
 is always resolved from the locale's current name and is also materialized into
 exports/backups for readability; it is not independently editable.
 
-`amount` is absent as a whole or contains both a value and a non-blank unit; a
-partially populated amount is invalid. Additional observers are observation
-level data because field companions may change during a survey.
+`amount` is absent as a whole or contains both a value and one of the five
+fixed units; a partial amount or custom unit is invalid. Additional observers
+are observation-level data because field companions may change during a survey.
 
 ### 6.4 Taxonomy package
 
@@ -711,6 +716,12 @@ user confirmation before removing downloaded data.
   and all of its entries. Restore validates the relation and taxonomy. If the
   same shared list already exists locally, restore merges missing entries
   without deleting newer local entries.
+- The fixed amount-unit decision does not add a SQLite schema migration. On
+  startup, native and browser repositories permanently delete observations
+  whose amount is negative, partial, or uses another unit, and discard
+  observation drafts with an unsupported saved unit. Backup restore likewise
+  omits incompatible observations. This intentional data-loss policy was
+  explicitly accepted for the local-only MVP.
 
 ## 10. Map-source strategy
 
@@ -813,7 +824,8 @@ are mandatory and exact:
 `Antal` is optional at workbook level. If at least one observation has an
 amount, append both `Antal` and `Enhet`; never emit one without the other. Rows
 without an amount leave both cells blank. Application validation guarantees
-that every numeric `Antal` has a non-blank `Enhet`.
+that every numeric `Antal` uses one of `stjälkar/strån/skott`, `plantor/tuvor`,
+`m2`, `dm2`, or `cm2` in `Enhet`.
 
 Keep this sheet limited to the interchange columns above so downstream imports
 are not broken by application metadata. The `Survey` sheet carries contextual
@@ -888,7 +900,8 @@ explicit backups.
 
 ### Unit and property tests
 
-- Survey/locale/observation validation and migrations.
+- Survey/locale/observation validation, fixed amount units, incompatible-data
+  cleanup, and migrations.
 - Locale live inheritance, independent time/position overrides, restored v2
   drafts, and clearing incompatible v1 drafts.
 - Coordinate control points, bounds, axis order, and round trips.

@@ -30,6 +30,7 @@ import {
   type ValidationErrors,
 } from "@/domain/validation";
 import { SpeciesPicker } from "@/features/taxonomy/SpeciesPicker";
+import { AmountUnitPicker } from "./AmountUnitPicker";
 import { dismissToLocale } from "@/navigation/hierarchy";
 import {
   createObservation,
@@ -206,6 +207,15 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
     setErrors((current) => ({ ...current, speciesQuery: undefined }));
   }
 
+  function updateAmount(value: string) {
+    setDraft((current) => (current ? { ...current, amount: value } : current));
+    setErrors((current) => ({
+      ...current,
+      amount: undefined,
+      unit: value.trim() ? current.unit : undefined,
+    }));
+  }
+
   function selectSpecies(value: Taxon | undefined) {
     setDraft((current) => current ? {
       ...current,
@@ -335,8 +345,8 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
         },
         positionOverridden: draft.positionOverridden,
         species,
-        amount: draft.amount.trim()
-          ? { value: Number(draft.amount.replace(",", ".")), unit: draft.unit.trim() }
+        amount: draft.amount.trim() && draft.unit
+          ? { value: Number(draft.amount.replace(",", ".")), unit: draft.unit }
           : undefined,
         publicComment: draft.publicComment.trim() || undefined,
         additionalObservers: parseAdditionalObservers(draft.additionalObservers),
@@ -452,10 +462,8 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
           </Card>
         )
       ) : null}
-      <View style={styles.twoColumns}>
-        <View style={styles.column}><Field label="Antal (valfritt)" value={draft.amount} onChangeText={(value) => update("amount", value)} keyboardType="decimal-pad" error={errors.amount} /></View>
-        <View style={styles.column}><Field label="Enhet" value={draft.unit} onChangeText={(value) => update("unit", value)} placeholder="individer" error={errors.unit} /></View>
-      </View>
+      <Field label="Antal (valfritt)" value={draft.amount} onChangeText={updateAmount} keyboardType="decimal-pad" error={errors.amount} />
+      <AmountUnitPicker value={draft.unit} onChange={(unit) => update("unit", unit)} error={errors.unit} />
       <Field label="Publik kommentar (valfri)" value={draft.publicComment} onChangeText={(value) => update("publicComment", value)} multiline placeholder="Kommentaren följer med i Excel-exporten" />
       <Field label="Med-observatör (valfri)" value={draft.additionalObservers} onChangeText={(value) => update("additionalObservers", value)} placeholder="Separera flera namn med semikolon" />
       <View style={styles.actions}>
