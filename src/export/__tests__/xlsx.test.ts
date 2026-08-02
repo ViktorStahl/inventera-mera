@@ -1,7 +1,12 @@
 import { strFromU8, unzipSync } from "fflate";
 
 import type { Observation, SpeciesList, Survey, SurveyLocale } from "@/domain/models";
-import { createSurveyWorkbook, sanitizeFileName } from "../xlsx";
+import {
+  createSurveyWorkbook,
+  EXCEL_ACCURACY_METERS,
+  roundAccuracyForExcel,
+  sanitizeFileName,
+} from "../xlsx";
 
 const survey: Survey = {
   id: "survey-1",
@@ -77,6 +82,22 @@ describe("Excel export", () => {
     expect(observations).not.toContain(">Antal</t>");
     expect(observations).not.toContain(">Enhet</t>");
     expect(observations).toContain("&apos;=Farlig formel");
+    expect(locales).toContain('<c r="D2" s="0"><v>5</v></c>');
+    expect(observations).toContain('<c r="E2" s="0"><v>5</v></c>');
+  });
+
+  it("rounds export accuracy to the closest approved metre value", () => {
+    expect(EXCEL_ACCURACY_METERS).toEqual([
+      1, 5, 10, 25, 50, 75, 100, 125, 150, 200, 250, 300, 400, 500, 750,
+      1000, 1500, 2000, 2500, 3000, 5000,
+    ]);
+    expect(roundAccuracyForExcel(0)).toBe(1);
+    expect(roundAccuracyForExcel(4.2)).toBe(5);
+    expect(roundAccuracyForExcel(7.5)).toBe(10);
+    expect(roundAccuracyForExcel(17.5)).toBe(25);
+    expect(roundAccuracyForExcel(624)).toBe(500);
+    expect(roundAccuracyForExcel(625)).toBe(750);
+    expect(roundAccuracyForExcel(8000)).toBe(5000);
   });
 
   it("includes both Antal and Enhet when any row has amount", () => {

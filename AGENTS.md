@@ -36,6 +36,8 @@ behaviour, architecture, and acceptance criteria.
 - Preserve the Swedish Excel interchange contract in `DESIGN.md`. In
   particular, never export `Antal` without `Enhet`, and keep the mandatory
   column names exact.
+- Round `Noggrannhet` only in Excel export to the fixed metre classes documented
+  in `DESIGN.md`; preserve the original accuracy in SQLite and JSON backup.
 - Amount units are restricted to `stjälkar/strån/skott`, `plantor/tuvor`, `m2`,
   `dm2`, and `cm2`; never offer or persist custom units. This rule intentionally
   uses startup cleanup rather than a new schema migration, as documented in

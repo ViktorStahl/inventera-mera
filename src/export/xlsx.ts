@@ -15,6 +15,27 @@ const REQUIRED_OBSERVATION_HEADERS = [
   "Med-observatör",
 ] as const;
 
+export const EXCEL_ACCURACY_METERS = [
+  1, 5, 10, 25, 50, 75, 100, 125, 150, 200, 250, 300, 400, 500, 750,
+  1000, 1500, 2000, 2500, 3000, 5000,
+] as const;
+
+export function roundAccuracyForExcel(accuracyMeters: number): number {
+  if (!Number.isFinite(accuracyMeters) || accuracyMeters < 0) {
+    throw new Error("Noggrannheten måste vara noll eller större.");
+  }
+  let closest: number = EXCEL_ACCURACY_METERS[0];
+  let closestDistance = Math.abs(accuracyMeters - closest);
+  for (const candidate of EXCEL_ACCURACY_METERS.slice(1)) {
+    const distance = Math.abs(accuracyMeters - candidate);
+    if (distance < closestDistance || (distance === closestDistance && candidate > closest)) {
+      closest = candidate;
+      closestDistance = distance;
+    }
+  }
+  return closest;
+}
+
 export function createSurveyWorkbook(
   survey: Survey,
   locales: SurveyLocale[],
@@ -75,7 +96,7 @@ export function createSurveyWorkbook(
       numberCell(locale.position.rt90.northing),
       locale.position.accuracyMeters == null
         ? stringCell("")
-        : numberCell(locale.position.accuracyMeters),
+        : numberCell(roundAccuracyForExcel(locale.position.accuracyMeters)),
       dateCell(localExcelSerial(locale.observedAt)),
       safeStringCell(locale.note ?? ""),
       numberCell(sortedObservations.filter((observation) => observation.localeId === locale.id).length),
@@ -92,7 +113,7 @@ export function createSurveyWorkbook(
         numberCell(observation.position.rt90.northing),
         observation.position.accuracyMeters == null
           ? stringCell("")
-          : numberCell(observation.position.accuracyMeters),
+          : numberCell(roundAccuracyForExcel(observation.position.accuracyMeters)),
         dateCell(localExcelSerial(observation.observedAt)),
         safeStringCell(observation.publicComment ?? ""),
         safeStringCell(observation.additionalObservers.join("; ")),

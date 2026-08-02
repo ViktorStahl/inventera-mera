@@ -127,6 +127,11 @@ independent of platform views where practical.
   override either value independently or return it to live inheritance. Editing
   an inherited locale value therefore updates all non-overridden observations.
 - Excel uses the Swedish interchange columns defined in section 11.
+- Excel rounds `Noggrannhet` to the nearest supported metre class: `1`, `5`,
+  `10`, `25`, `50`, `75`, `100`, `125`, `150`, `200`, `250`, `300`, `400`,
+  `500`, `750`, `1000`, `1500`, `2000`, `2500`, `3000`, or `5000`. Exact ties
+  use the higher class; values outside the range use the nearest endpoint. This
+  export normalization never changes the locally stored accuracy.
 - The local-only MVP allows permanent survey deletion after explicit
   confirmation. It deletes the survey, its locales, their observations, and
   associated drafts in one local operation. Locale deletion similarly cascades
@@ -552,7 +557,9 @@ Rules:
 - UI and export use the explicit labels `RT90 Northing (X)` and `RT90 Easting
   (Y)`; do not use two unlabeled numeric inputs.
 - Retain metre precision from conversion. Display whole metres by default but
-  do not silently discard additional stored precision.
+  do not silently discard additional stored precision. The only normalization
+  is the explicit Excel accuracy classification defined in section 11; it does
+  not mutate the stored position.
 - Reject non-finite values and values outside the official EPSG area of use;
   warn, rather than silently swapping, when values look reversed.
 - Validate the transformation against fixed control points in Sweden and test a
@@ -803,7 +810,7 @@ or document directory, without uploading data. The workbook contains:
 One row per locale with `Lokalnamn`, `Ost`, `Nord`, `Noggrannhet`,
 `Startdatum`, `Anteckning`, and `Antal observationer`. This is contextual app
 data; the mandatory external observation interchange contract remains on the
-next sheet.
+next sheet. `Noggrannhet` uses the same rounded export class as observations.
 
 ### Sheet `Observations`
 
@@ -816,7 +823,7 @@ are mandatory and exact:
 | `Lokalnamn` | Current name of the observation's owning locale |
 | `Ost` | RT90 easting (Y), numeric metres |
 | `Nord` | RT90 northing (X), numeric metres |
-| `Noggrannhet` | Location accuracy in metres; blank when unknown |
+| `Noggrannhet` | Location accuracy rounded to the nearest supported metre class; blank when unknown |
 | `Startdatum` | Observation date/time as a real Excel date cell, displayed `yyyy-mm-dd hh:mm` |
 | `Publik kommentar` | Public comment; blank when absent |
 | `Med-observatör` | Additional observer names joined with `; `; blank when absent |
@@ -826,6 +833,13 @@ amount, append both `Antal` and `Enhet`; never emit one without the other. Rows
 without an amount leave both cells blank. Application validation guarantees
 that every numeric `Antal` uses one of `stjälkar/strån/skott`, `plantor/tuvor`,
 `m2`, `dm2`, or `cm2` in `Enhet`.
+
+The supported `Noggrannhet` classes are `1`, `5`, `10`, `25`, `50`, `75`,
+`100`, `125`, `150`, `200`, `250`, `300`, `400`, `500`, `750`, `1000`, `1500`,
+`2000`, `2500`, `3000`, and `5000` metres. Export chooses the closest value,
+breaks an exact midpoint upward, clamps below/above the range to `1`/`5000`,
+and leaves unknown accuracy blank. The original value remains in SQLite and
+the lossless JSON backup.
 
 Keep this sheet limited to the interchange columns above so downstream imports
 are not broken by application metadata. The `Survey` sheet carries contextual
@@ -909,7 +923,8 @@ explicit backups.
   normalization/ranking, and CSV import validation.
 - Species-list identity, list-first ranking, shared-list deletion, schema v3,
   and backup merge behaviour.
-- File-name/cell sanitization and workbook column mapping.
+- File-name/cell sanitization, workbook column mapping, and GPS-accuracy class
+  boundaries.
 - Date/time-zone and daylight-saving boundaries.
 
 ### Component tests
