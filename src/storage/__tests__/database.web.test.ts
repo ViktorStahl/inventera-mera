@@ -75,7 +75,11 @@ describe("browser storage", () => {
     const survey = await repository.createSurvey(draft, region);
     expect((await repository.listSurveys())[0]).toMatchObject({ id: survey.id, localeCount: 0, observationCount: 0 });
     expect(await repository.loadDraft("survey:new")).toBeNull();
-    expect((await repository.searchTaxa("angsvadd"))[0]?.preferredName).toBe("Ängsvädd");
+    expect((await repository.searchTaxa("angsvadd"))[0]?.preferredName).toBe("ängsvädd");
+    expect((await repository.searchTaxa("Scabiosa succisa"))[0]).toMatchObject({
+      preferredName: "ängsvädd",
+      scientificName: "Succisa pratensis",
+    });
 
     const localeInput: Omit<SurveyLocale, "id" | "createdAt" | "updatedAt"> = {
       surveyId: survey.id,

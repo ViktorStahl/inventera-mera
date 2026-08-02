@@ -42,6 +42,12 @@ behaviour, architecture, and acceptance criteria.
   overwrite a restored v2 draft or an explicit override.
 - Do not put Dyntaxa subscription credentials in the mobile client. Generate
   downloadable taxonomy packages outside the client.
+- Rebuild the bundled Dyntaxa package with `npm run taxonomy:build`; do not edit
+  generated taxonomy assets manually. The source archive belongs at
+  `dyntaxa-raw/dyntaxa-dwca.zip` and remains untracked. Preserve the accepted
+  `Tracheophyta` root `urn:lsid:dyntaxa.se:Taxon:6000506`, include only accepted
+  `species` and `subspecies`, and retain non-accepted scientific names only as
+  search aliases for their accepted taxon.
 - Do not implement offline map downloads from `tile.openstreetmap.org`; its
   usage policy forbids that. Use a provider that explicitly permits offline
   use, or a self-hosted map package, and retain required attribution.

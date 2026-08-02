@@ -1,6 +1,6 @@
 import * as Crypto from "expo-crypto";
 
-import { SEED_TAXA } from "@/data/seedTaxa";
+import packagedTaxonomy from "@/data/generated/dyntaxaVascularPlants.json";
 import { findTaxonomy, VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
 import type {
   AppSettings,
@@ -24,6 +24,17 @@ import { migrateLegacyObservations, type LegacyObservation } from "./migrateLoca
 
 const STORAGE_KEY = "inventera-mera:web:v1";
 const SCHEMA_VERSION = 3;
+
+type PackagedTaxon = [
+  id: string,
+  preferredName: string,
+  scientificName: string,
+  synonyms: string[],
+  rank: string,
+  status: string,
+];
+
+const PACKAGED_TAXA = packagedTaxonomy.taxa as PackagedTaxon[];
 
 type BrowserDatabase = {
   schemaVersion: 3;
@@ -546,16 +557,21 @@ export async function searchTaxa(
       return terms.every((term) => searchable.includes(term));
     })
     .map(speciesListEntryToTaxon);
-  const taxonomyMatches = SEED_TAXA.filter((taxon) => {
+  const taxonomyMatches = PACKAGED_TAXA.filter((taxon) => {
     const searchable = normalize(
-      [taxon.preferredName, taxon.scientificName, ...taxon.synonyms].join(" "),
+      [taxon[1], taxon[2], ...taxon[3]].join(" "),
     );
     return terms.every((term) => searchable.includes(term));
   })
-    .filter((taxon) => !listTaxonIds.has(taxon.id))
+    .filter((taxon) => !listTaxonIds.has(taxon[0]))
     .map<Taxon>((taxon) => ({
-      ...taxon,
+      id: taxon[0],
       source: "taxonomy",
+      preferredName: taxon[1],
+      scientificName: taxon[2],
+      synonyms: taxon[3],
+      rank: taxon[4],
+      status: taxon[5],
       inSpeciesList: false,
     }));
   return [...listMatches, ...taxonomyMatches]

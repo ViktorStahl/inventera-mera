@@ -11,6 +11,7 @@
     "android:java": "node scripts/run-android.mjs --print-java-home",
     "ios": "expo run:ios",
     "prebuild": "expo prebuild",
+    "taxonomy:build": "node --max-old-space-size=1024 scripts/build-dyntaxa-taxonomy.mjs",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
     "lint": "eslint ."

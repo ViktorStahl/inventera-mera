@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { findTaxonomy } from "@/data/taxonomies";
 import type { Taxon } from "@/domain/models";
 import { searchTaxa } from "@/storage/database";
 import { Field } from "@/ui/Field";
@@ -26,6 +27,7 @@ export function SpeciesPicker({
   error?: string;
 }) {
   const [results, setResults] = useState<Taxon[]>([]);
+  const taxonomy = findTaxonomy(taxonomyPackageId);
 
   useEffect(() => {
     let active = true;
@@ -99,7 +101,9 @@ export function SpeciesPicker({
         </View>
       ) : null}
       <Text style={styles.source}>
-        Offline-startlista för MVP · fullständigt Dyntaxa-paket ansluts separat
+        {taxonomy
+          ? `${taxonomy.name} · ${taxonomy.entryCount.toLocaleString("sv-SE")} arter och underarter · offline`
+          : "Taxonomin är inte installerad"}
       </Text>
     </View>
   );

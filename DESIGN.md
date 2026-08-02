@@ -1,7 +1,7 @@
 # Inventera mera — product and technical design
 
 Status: MVP implemented; remaining sections describe the production-capable target  
-Last updated: 2026-08-01
+Last updated: 2026-08-02
 
 Platform decision: React Native with Expo for iOS and Android, plus an Expo Web
 browser preview. Native remains the field-production target.
@@ -10,11 +10,11 @@ Android builds are pinned operationally to JDK 17 through the repository's npm
 wrapper. This avoids machine-global JDK upgrades changing the Gradle runtime;
 the current Android Gradle Plugin 8.12 declares JDK 17 as its default.
 
-## Implementation status (MVP, 2026-08-01)
+## Implementation status (MVP, 2026-08-02)
 
 The repository contains a working local-only MVP for the requested core flow:
 survey list/search/create/open, locale creation, observations within locales,
-draft recovery, SCB county/municipality selection, offline starter-taxonomy
+draft recovery, SCB county/municipality selection, offline Dyntaxa taxonomy
 search with free text, reusable species lists with list-first suggestions and a
 default-taxonomy setting, RT90 input and device-position conversion, map filtering,
 Excel export, JSON backup/restore, and offline editing and permanent deletion of
@@ -24,10 +24,11 @@ cascades through the hierarchy and requires explicit destructive confirmation.
 
 The browser preview shares the core routes and uses localStorage, browser file
 downloads, browser geolocation, and an RT90 coordinate map. It is responsive but
-is not yet an installable/service-worker-backed PWA. Two integrations deliberately
-remain adapters rather than simulated production
-features. The bundled vascular-plant list is a small workflow-testing subset
-until an authorised, versioned Dyntaxa distribution source is chosen. The map
+is not yet an installable/service-worker-backed PWA. The bundled Dyntaxa package
+contains 10,711 accepted species and subspecies below the vascular-plant root
+from the 2026-06-18 Darwin Core Archive. Native search uses its bundled SQLite
+FTS5 database; the browser preview searches a compact generated JSON equivalent.
+The map
 accepts a MapLibre style URL for the selected Lantmäteriet raster product and
 falls back to an offline coordinate plot until the organisation supplies its
 approved processed tile endpoint and attribution. Custom taxonomy import,
@@ -98,9 +99,10 @@ independent of platform views where practical.
 - A survey region is selected from searchable Swedish counties and
   municipalities, with optional free text for a more specific area.
 - Amount is optional. When an amount is entered, a unit is required.
-- All taxonomic ranks/statuses within the selected taxonomy group are
-  selectable for now. Rank and status remain visible so users can judge the
-  suggestion.
+- The bundled Dyntaxa taxonomy contains only accepted taxa with raw rank
+  `species` or `subspecies` below the accepted `Tracheophyta` root. Non-accepted
+  scientific names and alternative Swedish names are searchable aliases, not
+  separate selectable taxa. Rank and status remain visible in suggestions.
 - Every survey has one selected taxonomy and may reference one reusable species
   list (`artlista`) built against that taxonomy. A new list is empty. Lists may
   contain taxonomy-backed snapshots and free-text species, can be renamed, and
@@ -112,9 +114,8 @@ independent of platform views where practical.
   transaction. Duplicate list entries are ignored by normalized identity.
 - The app setting `default taxonomy` supplies the initial selection for new
   surveys and species lists. Changing it never changes existing surveys, lists,
-  or observation snapshots. The installed MVP choice is the vascular-plant
-  starter package; the production package will contain the complete configured
-  vascular-plant subtree, including its species and subspecies.
+  or observation snapshots. The installed MVP choice is the complete configured
+  Dyntaxa vascular-plant package of accepted species and subspecies.
 - The MVP basemap uses Lantmäteriet's downloadable raster topographic map.
 - The field hierarchy is Survey → Locale → Observation. A locale has a required
   name, time, and coordinate plus an optional note.
@@ -566,32 +567,48 @@ references to review implementation rather than inventing projection parameters.
 ### 8.1 Dyntaxa source
 
 Dyntaxa is continuously maintained and contains preferred names, synonyms, and
-taxonomic relationships. SLU exposes the Dyntaxa Taxon Service API and a Darwin
-Core Archive export; the archive is updated daily. The initial package is the
-vascular-plant branch (`Kärlväxter`), subject to confirming the authoritative
-root taxon/list identifier during implementation. Do not filter the package to
-species: all included ranks and statuses are selectable for the MVP, including
-subspecies, hybrids, aggregates, and higher or otherwise non-species taxa.
-Preserve rank/status and make them visible in search results.
+taxonomic relationships. The bundled source is the Dyntaxa Darwin Core Archive
+published 2026-06-18 (dataset `de8934f4-a136-481c-a87a-b0b202b80a31`, DOI
+`10.15468/j43wfc`, CC0 1.0). Its authoritative vascular-plant root is the
+accepted phylum `Tracheophyta`, Dyntaxa ID
+`urn:lsid:dyntaxa.se:Taxon:6000506`, with preferred Swedish name `kärlväxter`.
+
+The package includes an accepted taxon only when it descends from that root via
+`parentNameUsageID` and its Darwin Core `taxonRank` is exactly `species` or
+`subspecies`. The build cross-checks this hierarchy selection against the
+archive's denormalized `phylum = Tracheophyta` value. Scientific synonym rows
+that refer to one of the selected accepted taxa and alternative Swedish
+vernacular names are retained as search aliases. Higher ranks, varieties,
+forms, hybrids, aggregates, non-accepted duplicate results, and taxa outside
+vascular plants are excluded.
 
 Do not call protected Dyntaxa endpoints directly from the mobile client with a
 secret.
-Create taxonomy packages in a build/admin job:
+Create taxonomy packages in a build/admin job. For the bundled package, place
+the source at `dyntaxa-raw/dyntaxa-dwca.zip` and run
+`npm run taxonomy:build`. The source directory is ignored by Git; the generated
+SQLite database, web dataset, and manifest are versioned application assets.
+
+The build job must:
 
 1. Download the official archive/API data under its current terms.
 2. Select the target taxonomic subtree and supported ranks/statuses.
 3. Normalize the minimal search fields and preserve source IDs.
-4. Produce a versioned SQLite package with FTS5 search tables plus a small
-   manifest, record count, source URL/date, licence/citation, and SHA-256.
-5. Publish over HTTPS. The app downloads it to a staging file, verifies the
+4. Produce a versioned SQLite package with FTS5 search tables, a compact web
+   equivalent, and a small manifest with record count, source date,
+   licence/citation, and SHA-256 checksums.
+5. Bundle the MVP package with the application. A future catalogue may publish
+   packages over HTTPS; the app then downloads to a staging file, verifies the
    checksum and format, then atomically moves and activates it.
 6. Keep the previous version until activation succeeds; allow rollback/removal
    when it is not the only copy needed for an active survey.
 
-Searching the active package is entirely local through parameterized SQLite
-FTS5/prefix queries. Never load the entire taxonomy into JavaScript or the React
-Native render thread. Query and paginate only the result fields needed by the
-species picker.
+Searching the active native package is entirely local through parameterized
+SQLite FTS5/prefix queries. Native code never loads the entire taxonomy into
+JavaScript or the React Native render thread and queries only result fields
+needed by the species picker. The Expo Web preview has no native SQLite layer;
+it uses the generated compact tuple dataset and performs the equivalent local,
+accent-insensitive search without network access.
 
 ### 8.2 Custom taxonomy import
 
@@ -875,7 +892,8 @@ explicit backups.
 - Locale live inheritance, independent time/position overrides, restored v2
   drafts, and clearing incompatible v1 drafts.
 - Coordinate control points, bounds, axis order, and round trips.
-- Taxonomy normalization/ranking and CSV import validation.
+- Dyntaxa subtree/rank selection, package manifest consistency, taxonomy
+  normalization/ranking, and CSV import validation.
 - Species-list identity, list-first ranking, shared-list deletion, schema v3,
   and backup merge behaviour.
 - File-name/cell sanitization and workbook column mapping.
@@ -923,7 +941,8 @@ treat simulator or Expo Go results as release verification.
 
 - Device location transforms to RT90 offline and displays accuracy.
 - Fixed control-point tests prove axis order and acceptable transformation.
-- Vascular-plant taxonomy can be downloaded atomically and searched offline.
+- The bundled vascular-plant taxonomy can be searched offline by Swedish name,
+  scientific name, and retained synonym.
 - A valid custom CSV taxonomy can be previewed, imported, selected, and removed.
 - Updating/removing taxonomy data does not alter historical observations.
 

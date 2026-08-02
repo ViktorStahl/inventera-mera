@@ -20,7 +20,8 @@ Read [DESIGN.md](./DESIGN.md) for the product and architecture contract and
   public comment, and additional observers remain observation fields.
 - Transform GPS coordinates locally with Lantmäteriet's national RT90 direct
   projection and verify it against their published control example.
-- Small offline vascular-plant starter taxonomy plus unrestricted free text.
+- Bundled offline Dyntaxa taxonomy with 10,711 accepted vascular-plant species
+  and subspecies, Swedish/scientific/synonym search, plus unrestricted free text.
 - Reusable offline species lists: create/rename/delete lists, add/remove
   taxonomy or free-text species, attach a list to a survey, and rank matching
   list entries before the rest of the taxonomy.
@@ -80,6 +81,25 @@ npm run lint
 npm test
 ```
 
+## Rebuild the bundled Dyntaxa taxonomy
+
+The checked-in package was generated from the Dyntaxa Darwin Core Archive
+published 2026-06-18 (CC0 1.0, [dataset DOI](https://doi.org/10.15468/j43wfc)).
+It contains only accepted `species` and `subspecies` descendants of
+`Tracheophyta` (`urn:lsid:dyntaxa.se:Taxon:6000506`). Scientific synonyms and
+alternative Swedish names remain searchable aliases.
+
+Place a replacement archive at `dyntaxa-raw/dyntaxa-dwca.zip`, then run:
+
+```sh
+npm run taxonomy:build
+```
+
+The raw directory is intentionally ignored by Git. Commit the generated native
+SQLite asset, web JSON asset, and manifest together. The build validates Darwin
+Core columns, hierarchy, rank counts, package row count, and records source and
+output SHA-256 checksums.
+
 ## Lantmäteriet map configuration
 
 The selected MVP source is Lantmäteriet's downloadable raster topographic map.
@@ -96,9 +116,9 @@ and continues to plot observations offline on a coordinate grid.
 
 ## MVP boundaries
 
-- The bundled taxonomy is a workflow-testing starter list, not the complete
-  Dyntaxa vascular-plant package. The package build/download adapter still
-  needs an authorised distribution endpoint.
+- Downloading/updating additional taxonomy packages in the app and custom
+  taxonomy import remain future work; the Dyntaxa vascular-plant package is
+  currently bundled with the application.
 - Lantmäteriet map package generation and offline-region download management
   require the selected organisation-controlled endpoint and final terms review.
 - Native release builds and GPS/map behaviour must be verified on physical iOS

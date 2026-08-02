@@ -1,0 +1,30 @@
+{
+  "formatVersion": 1,
+  "packageId": "vascular-plants-starter",
+  "name": "Kärlväxter (Dyntaxa)",
+  "version": "2026-06-18-dwca",
+  "source": "Dyntaxa. Svensk taxonomisk databas",
+  "sourceDatasetId": "de8934f4-a136-481c-a87a-b0b202b80a31",
+  "sourceDoi": "https://doi.org/10.15468/j43wfc",
+  "sourcePublicationDate": "2026-06-18",
+  "sourceArchiveSha256": "e13b36270927aeda6cbf524140550f47a8105e34e975fdc05b922335d66635ae",
+  "license": "CC0 1.0",
+  "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode",
+  "rootTaxonId": "urn:lsid:dyntaxa.se:Taxon:6000506",
+  "rootScientificName": "Tracheophyta",
+  "rootPreferredName": "kärlväxter",
+  "includedRawRanks": [
+    "species",
+    "subspecies"
+  ],
+  "entryCount": 10711,
+  "rankCounts": {
+    "art": 9866,
+    "underart": 845
+  },
+  "taxaWithPreferredSwedishName": 8925,
+  "synonymCount": 13740,
+  "multiplePreferredSwedishNames": 0,
+  "databaseFile": "dyntaxa-vascular-plants.db",
+  "databaseSha256": "f2e5f4189e1e83004ab29f38faaabe419a5e4a53f82b4e2bbcd8a53d48d2857b"
+}

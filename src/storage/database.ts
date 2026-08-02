@@ -1,7 +1,7 @@
 import * as Crypto from "expo-crypto";
 import * as SQLite from "expo-sqlite";
 
-import { SEED_TAXA } from "@/data/seedTaxa";
+import taxonomyManifest from "@/data/generated/dyntaxaVascularPlants.manifest.json";
 import { findTaxonomy, VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
 import type {
   AppSettings,
@@ -26,8 +26,13 @@ import { migrateLegacyObservations, type LegacyObservation } from "./migrateLoca
 
 const DATABASE_NAME = "inventera-mera.db";
 const SCHEMA_VERSION = 3;
+const TAXONOMY_DATABASE_NAME = `dyntaxa-vascular-plants-${taxonomyManifest.version}.db`;
+const TAXONOMY_DATABASE_ASSET = require(
+  "../../assets/taxonomies/dyntaxa-vascular-plants.db",
+) as number;
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | undefined;
+let taxonomyDatabasePromise: Promise<SQLite.SQLiteDatabase> | undefined;
 
 type LocaleInput = Omit<SurveyLocale, "id" | "createdAt" | "updatedAt">;
 type ObservationInput = Omit<Observation, "id" | "createdAt" | "updatedAt">;
@@ -50,7 +55,32 @@ async function openAndMigrate(): Promise<SQLite.SQLiteDatabase> {
   if (version < 1) await migrateToVersionOne(database);
   if (version < 2) await migrateToVersionTwo(database);
   if (version < 3) await migrateToVersionThree(database);
-  await seedTaxonomy(database);
+  return database;
+}
+
+async function getTaxonomyDatabase(): Promise<SQLite.SQLiteDatabase> {
+  if (!taxonomyDatabasePromise) taxonomyDatabasePromise = openTaxonomyDatabase();
+  return taxonomyDatabasePromise;
+}
+
+async function openTaxonomyDatabase(): Promise<SQLite.SQLiteDatabase> {
+  await SQLite.importDatabaseFromAssetAsync(TAXONOMY_DATABASE_NAME, {
+    assetId: TAXONOMY_DATABASE_ASSET,
+  });
+  const database = await SQLite.openDatabaseAsync(TAXONOMY_DATABASE_NAME);
+  await database.execAsync("PRAGMA query_only = ON;");
+  const rows = await database.getAllAsync<TaxonomyManifestRow>(
+    "SELECT key, value FROM package_manifest",
+  );
+  const installedManifest = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  if (
+    installedManifest.packageId !== taxonomyManifest.packageId ||
+    installedManifest.version !== taxonomyManifest.version ||
+    installedManifest.entryCount !== String(taxonomyManifest.entryCount)
+  ) {
+    await database.closeAsync();
+    throw new Error("Det installerade taxonomipaketet har fel version eller innehåll.");
+  }
   return database;
 }
 
@@ -257,28 +287,6 @@ async function migrateToVersionThree(database: SQLite.SQLiteDatabase): Promise<v
 
       PRAGMA user_version = 3;
     `);
-  });
-}
-
-async function seedTaxonomy(database: SQLite.SQLiteDatabase): Promise<void> {
-  const row = await database.getFirstAsync<{ count: number }>(
-    "SELECT count(*) AS count FROM taxon_search",
-  );
-  if ((row?.count ?? 0) > 0) return;
-  await database.withTransactionAsync(async () => {
-    for (const taxon of SEED_TAXA) {
-      await database.runAsync(
-        `INSERT INTO taxon_search
-         (id, preferred_name, scientific_name, synonyms, taxon_rank, status)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        taxon.id,
-        taxon.preferredName,
-        taxon.scientificName,
-        taxon.synonyms.join(" | "),
-        taxon.rank,
-        taxon.status,
-      );
-    }
   });
 }
 
@@ -860,7 +868,6 @@ export async function searchTaxa(
     speciesListId &&
     (!selectedSpeciesList || selectedSpeciesList.taxonomyRef.packageId !== taxonomyPackageId)
   ) return [];
-  const database = await getDatabase();
   const terms = query
     .trim()
     .split(/\s+/)
@@ -879,7 +886,8 @@ export async function searchTaxa(
   const listMatches = listEntries
     .filter((entry) => speciesSnapshotMatches(entry.species, terms))
     .map(speciesListEntryToTaxon);
-  const rows = await database.getAllAsync<TaxonRow>(
+  const taxonomyDatabase = await getTaxonomyDatabase();
+  const rows = await taxonomyDatabase.getAllAsync<TaxonRow>(
     `SELECT id, preferred_name, scientific_name, synonyms, taxon_rank, status
        FROM taxon_search WHERE taxon_search MATCH ?
        ORDER BY bm25(taxon_search), preferred_name COLLATE NOCASE
@@ -1666,4 +1674,9 @@ type TaxonRow = {
   synonyms: string;
   taxon_rank: string;
   status: string;
+};
+
+type TaxonomyManifestRow = {
+  key: string;
+  value: string;
 };
