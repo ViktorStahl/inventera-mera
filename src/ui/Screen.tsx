@@ -1,12 +1,11 @@
 import type { PropsWithChildren } from "react";
 import {
-  KeyboardAvoidingView,
   Platform,
-  ScrollView,
   StyleSheet,
   View,
   type ScrollViewProps,
 } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { colors, spacing } from "./theme";
@@ -18,24 +17,22 @@ type Props = PropsWithChildren<{
 
 export function Screen({ children, scroll = true, contentContainerStyle }: Props) {
   const content = scroll ? (
-    <ScrollView
+    <KeyboardAwareScrollView
       style={styles.flex}
       contentContainerStyle={[styles.content, contentContainerStyle]}
+      bottomOffset={spacing.xl}
+      keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
       keyboardShouldPersistTaps="handled"
     >
       {children}
-    </ScrollView>
+    </KeyboardAwareScrollView>
   ) : (
     <View style={[styles.flex, contentContainerStyle]}>{children}</View>
   );
+
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        {content}
-      </KeyboardAvoidingView>
+      {content}
     </SafeAreaView>
   );
 }

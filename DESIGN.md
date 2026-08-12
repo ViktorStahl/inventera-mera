@@ -1,7 +1,7 @@
 # Inventera mera — product and technical design
 
 Status: MVP implemented; remaining sections describe the production-capable target  
-Last updated: 2026-08-02
+Last updated: 2026-08-12
 
 Platform decision: React Native with Expo for iOS and Android, plus an Expo Web
 browser preview. Native remains the field-production target.
@@ -101,6 +101,14 @@ independent of platform views where practical.
 - Amount is optional. When an amount is entered, a unit is required and must be
   one of `stjälkar/strån/skott`, `plantor/tuvor`, `m2`, `dm2`, or `cm2`.
   Custom unit text is not supported. Tapping the selected unit again clears it.
+- Mobile form screens resize around the software keyboard and scroll the
+  focused field into view, including when focus changes while the keyboard is
+  already open. Native forms use a keyboard-aware scroll view that follows the
+  actual keyboard frame, including IME accessory rows such as Gboard's options,
+  and keeps 24 density-independent pixels below the focused input. It does not
+  use numeric text-input targets or React Native's legacy scroll-responder
+  measurement helper. A drag may dismiss the keyboard without discarding form
+  data. Expo Web retains a plain scroll view without native keyboard imports.
 - The bundled Dyntaxa taxonomy contains only accepted taxa with raw rank
   `species` or `subspecies` below the accepted `Tracheophyta` root. Non-accepted
   scientific names and alternative Swedish names are searchable aliases, not
