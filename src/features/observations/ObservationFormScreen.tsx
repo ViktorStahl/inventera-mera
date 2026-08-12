@@ -31,6 +31,11 @@ import {
 } from "@/domain/validation";
 import { SpeciesPicker } from "@/features/taxonomy/SpeciesPicker";
 import { AmountUnitPicker } from "./AmountUnitPicker";
+import {
+  ObservationDetailsAccordion,
+  observationDetailsHaveErrors,
+  observationDetailsInitiallyExpanded,
+} from "./ObservationDetailsSection";
 import { dismissToLocale } from "@/navigation/hierarchy";
 import {
   createObservation,
@@ -96,6 +101,7 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const draftSpeciesQuery = draft?.speciesQuery ?? "";
   const draftSelectedTaxon = draft?.selectedTaxon;
 
@@ -143,11 +149,13 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
       setLocale(loadedLocale);
       setSpeciesList(loadedSpeciesList ?? undefined);
       if (loadedObservation) setObservation(loadedObservation);
-      setDraft(stored ? {
+      const nextDraft = stored ? {
         ...baseDraft,
         ...stored,
         addToSpeciesList: stored.addToSpeciesList ?? false,
-      } : baseDraft);
+      } : baseDraft;
+      setDraft(nextDraft);
+      setDetailsExpanded(observationDetailsInitiallyExpanded(nextDraft));
     }
     hydrate()
       .catch((error) => Alert.alert("Kunde inte öppna observationen", messageOf(error)))
@@ -246,6 +254,15 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
     setErrors((current) => ({ ...current, northing: undefined, easting: undefined }));
   }
 
+  function updateAccuracy(value: string) {
+    setDraft((current) => current ? {
+      ...current,
+      accuracyMeters: value,
+      positionOverridden: true,
+    } : current);
+    setErrors((current) => ({ ...current, accuracyMeters: undefined }));
+  }
+
   function useLocaleTime() {
     if (!locale) return;
     setDraft((current) => current ? {
@@ -313,6 +330,7 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
     if (!surveyId || !locale || !draft || !survey) return;
     const nextErrors = validateObservationDraft(draft);
     setErrors(nextErrors);
+    if (observationDetailsHaveErrors(nextErrors)) setDetailsExpanded(true);
     if (hasErrors(nextErrors)) return;
     setSaving(true);
     try {
@@ -388,52 +406,17 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
   }
 
   return (
-    <Screen>
+    <Screen
+      footer={(
+        <Button
+          label={editing ? "Spara ändringar" : "Spara observation"}
+          loading={saving}
+          disabled={!hydrated || deleting}
+          onPress={() => void save()}
+        />
+      )}
+    >
       <Stack.Screen options={{ title: editing ? "Redigera observation" : "Ny observation" }} />
-      <Card>
-        <Text style={styles.localeLabel}>Lokal</Text>
-        <Text style={styles.localeName}>{locale.name}</Text>
-        <Text style={styles.inheritanceHint}>Tid och position följer lokalen tills du ändrar dem.</Text>
-      </Card>
-      <View style={styles.twoColumns}>
-        <View style={styles.column}>
-          <Field label="Datum" value={draft.date} onChangeText={(value) => updateTime("date", value)} keyboardType="numbers-and-punctuation" error={errors.date} />
-        </View>
-        <View style={styles.column}>
-          <Field label="Tid" value={draft.time} onChangeText={(value) => updateTime("time", value)} keyboardType="numbers-and-punctuation" error={errors.time} />
-        </View>
-      </View>
-      <View style={styles.twoColumns}>
-        <View style={styles.column}><Button label="Nu" variant="secondary" onPress={useNow} /></View>
-        <View style={styles.column}><Button label="Använd lokalens tid" variant="secondary" onPress={useLocaleTime} /></View>
-      </View>
-      <Text style={styles.overrideStatus}>{draft.timeOverridden ? "Egen tid" : "Följer lokalens tid"}</Text>
-      <Text style={styles.sectionTitle}>Koordinater · RT90 2,5 gon V</Text>
-      <View style={styles.twoColumns}>
-        <View style={styles.column}>
-          <Field label="Nord (X)" value={draft.northing} onChangeText={(value) => updateManualCoordinate("northing", value)} keyboardType="decimal-pad" error={errors.northing} />
-        </View>
-        <View style={styles.column}>
-          <Field label="Öst (Y)" value={draft.easting} onChangeText={(value) => updateManualCoordinate("easting", value)} keyboardType="decimal-pad" error={errors.easting} />
-        </View>
-      </View>
-      <Field
-        label="Noggrannhet i meter (valfri)"
-        value={draft.accuracyMeters}
-        onChangeText={(value) => {
-          update("accuracyMeters", value);
-          update("positionOverridden", true);
-        }}
-        keyboardType="decimal-pad"
-        editable={draft.positionSource !== "device"}
-        hint={draft.positionSource === "device" ? "Rapporterad av enhetens positionstjänst." : undefined}
-        error={errors.accuracyMeters}
-      />
-      <View style={styles.twoColumns}>
-        <View style={styles.column}><Button label="Min position" variant="secondary" loading={locating} onPress={() => void captureLocation()} /></View>
-        <View style={styles.column}><Button label="Använd lokalens position" variant="secondary" onPress={useLocalePosition} /></View>
-      </View>
-      <Text style={styles.overrideStatus}>{draft.positionOverridden ? "Egen position" : "Följer lokalens position"}</Text>
       <SpeciesPicker
         query={draft.speciesQuery}
         selectedTaxon={draft.selectedTaxon}
@@ -464,10 +447,26 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
       ) : null}
       <Field label="Antal (valfritt)" value={draft.amount} onChangeText={updateAmount} keyboardType="decimal-pad" error={errors.amount} />
       <AmountUnitPicker value={draft.unit} onChange={(unit) => update("unit", unit)} error={errors.unit} />
+      <ObservationDetailsAccordion
+        localeName={locale.name}
+        draft={draft}
+        errors={errors}
+        expanded={detailsExpanded}
+        locating={locating}
+        onToggle={() => setDetailsExpanded((current) => !current)}
+        onDateChange={(value) => updateTime("date", value)}
+        onTimeChange={(value) => updateTime("time", value)}
+        onUseNow={useNow}
+        onUseLocaleTime={useLocaleTime}
+        onNorthingChange={(value) => updateManualCoordinate("northing", value)}
+        onEastingChange={(value) => updateManualCoordinate("easting", value)}
+        onAccuracyChange={updateAccuracy}
+        onCaptureLocation={() => void captureLocation()}
+        onUseLocalePosition={useLocalePosition}
+      />
       <Field label="Publik kommentar (valfri)" value={draft.publicComment} onChangeText={(value) => update("publicComment", value)} multiline placeholder="Kommentaren följer med i Excel-exporten" />
       <Field label="Med-observatör (valfri)" value={draft.additionalObservers} onChangeText={(value) => update("additionalObservers", value)} placeholder="Separera flera namn med semikolon" />
       <View style={styles.actions}>
-        <Button label={editing ? "Spara ändringar" : "Spara observation"} loading={saving} disabled={!hydrated || deleting} onPress={() => void save()} />
         {editing ? <Button label="Radera observation" variant="danger" loading={deleting} disabled={saving} onPress={() => void remove()} /> : null}
         <Button label="Avbryt" variant="ghost" onPress={() => router.back()} />
       </View>
@@ -543,13 +542,6 @@ function messageOf(error: unknown): string {
 
 const styles = StyleSheet.create({
   center: { alignItems: "center", justifyContent: "center" },
-  localeLabel: { color: colors.textMuted, fontSize: 13 },
-  localeName: { color: colors.text, fontSize: 18, fontWeight: "700", marginTop: spacing.xs },
-  inheritanceHint: { color: colors.textMuted, marginTop: spacing.xs },
-  twoColumns: { flexDirection: "row", gap: spacing.md, alignItems: "flex-start" },
-  column: { flex: 1 },
-  sectionTitle: { color: colors.text, fontSize: 16, fontWeight: "700", marginBottom: -spacing.sm },
-  overrideStatus: { color: colors.green800, fontSize: 13, marginTop: -spacing.sm },
   inListCard: { backgroundColor: colors.green100 },
   inListText: { color: colors.green800, fontWeight: "700" },
   addToListSelected: { borderColor: colors.green700, borderWidth: 2, backgroundColor: colors.green100 },

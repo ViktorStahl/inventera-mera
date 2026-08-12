@@ -134,6 +134,10 @@ independent of platform views where practical.
 - An observation uses its locale's time and coordinate by default. The user can
   override either value independently or return it to live inheritance. Editing
   an inherited locale value therefore updates all non-overridden observations.
+- Observation entry keeps the primary task near the top: species and amount
+  precede a single inline accordion for time and position. Its compact header
+  says whether those values follow the locale or are specific to the
+  observation; its fields open directly beneath that header in the same box.
 - Excel uses the Swedish interchange columns defined in section 11.
 - Excel rounds `Noggrannhet` to the nearest supported metre class: `1`, `5`,
   `10`, `25`, `50`, `75`, `100`, `125`, `150`, `200`, `250`, `300`, `400`,
@@ -281,25 +285,33 @@ confirmation and deletes all observations in it.
 
 ### 5.5 Add/edit observation
 
-Fields, in order:
+The primary form order is:
 
-1. Local date and time, required; live-inherited from the locale unless overridden.
-2. Read-only locale name (`Lokalnamn`), required through the locale relation.
-3. Coordinates in `RT90 2.5 gon V` using the EPSG:3847 direct-projection emulation, required and live-inherited unless overridden:
-   `Northing (X)` and `Easting (Y)`, both in metres.
-4. Location accuracy in metres, read-only when supplied by device GPS.
-5. Species, required, either a selected taxon or free text.
-6. When the survey has a species list, an optional control to add the current
+1. Species, required, either a selected taxon or free text.
+2. When the survey has a species list, an optional control to add the current
    taxonomy/free-text species to that list as part of save. It is omitted when
    the normalized species identity is already present.
-7. Amount, optional non-negative number. If present, unit is required and is
+3. Amount, optional non-negative number. If present, unit is required and is
    selected from exactly `stjälkar/strån/skott`, `plantor/tuvor`, `m2`, `dm2`,
    or `cm2`. The control does not accept custom text and toggles the selected
    unit off when it is pressed again, allowing an accidental choice to be cleared.
-8. Public comment (`Publik kommentar`), optional multiline plain text. Make its
+4. One accordion whose header identifies the owning locale and states whether
+   time/position follow it or are specific to the observation. Expanding it
+   reveals local date/time, RT90 Northing/Easting, optional accuracy, and their
+   quick actions immediately below the header inside the same bordered box.
+   Date/time and coordinates are required and live-inherited unless independently
+   overridden. Accuracy is read-only when supplied by device GPS.
+5. Public comment (`Publik kommentar`), optional multiline plain text. Make its
    exported/public character clear in the label.
-9. Additional observers (`Med-observatör`), optional repeatable names. Trim
+6. Additional observers (`Med-observatör`), optional repeatable names. Trim
    names, preserve spelling and ordering, and prevent empty entries.
+
+The inherited-details section is collapsed for a new or edited observation
+whose time and position both follow its locale. It starts expanded for an
+existing or restored draft with either override, expands automatically when a
+contained field fails validation, and retains its open/closed state during the
+current form session. The accordion header remains directly adjacent to the
+fields it reveals, so expansion never inserts controls elsewhere in the form.
 
 Defaulting runs only when creating a genuinely new blank form. A restored v2
 draft always wins. `Use locale time` and `Use locale position` clear their
@@ -311,8 +323,10 @@ accuracy`, `permission denied`, `unavailable`, and `timed out` states. Saving
 is possible after manual coordinate entry even if geolocation fails.
 
 Validate on blur and save. Preserve all entered values after validation errors.
-The save button remains reachable above the mobile keyboard. A destructive
-delete action is only shown when editing an existing observation.
+The primary save button is in a persistent footer that follows the native
+keyboard frame—including IME accessory rows—and stays above the safe area on
+Web. A destructive delete action is only shown when editing an existing
+observation.
 
 ### 5.6 Species picker
 
@@ -931,6 +945,8 @@ explicit backups.
 ### Component tests
 
 - All form states, draft restoration, error focus, and free-text path.
+- Observation-details accordion adjacency, collapse/expand state,
+  override/error auto-expansion, status wording, and keyboard-sticky save action.
 - Species keyboard/touch selection and accessible announcements.
 - Online/offline/storage indicators.
 - Map fallback without a basemap.

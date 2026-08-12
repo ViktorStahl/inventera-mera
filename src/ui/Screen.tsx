@@ -1,11 +1,14 @@
-import type { PropsWithChildren } from "react";
+import type { PropsWithChildren, ReactNode } from "react";
 import {
   Platform,
   StyleSheet,
   View,
   type ScrollViewProps,
 } from "react-native";
-import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import {
+  KeyboardAwareScrollView,
+  KeyboardStickyView,
+} from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { colors, spacing } from "./theme";
@@ -13,13 +16,18 @@ import { colors, spacing } from "./theme";
 type Props = PropsWithChildren<{
   scroll?: boolean;
   contentContainerStyle?: ScrollViewProps["contentContainerStyle"];
+  footer?: ReactNode;
 }>;
 
-export function Screen({ children, scroll = true, contentContainerStyle }: Props) {
+export function Screen({ children, scroll = true, contentContainerStyle, footer }: Props) {
   const content = scroll ? (
     <KeyboardAwareScrollView
       style={styles.flex}
-      contentContainerStyle={[styles.content, contentContainerStyle]}
+      contentContainerStyle={[
+        styles.content,
+        footer ? styles.contentWithFooter : undefined,
+        contentContainerStyle,
+      ]}
       bottomOffset={spacing.xl}
       keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
       keyboardShouldPersistTaps="handled"
@@ -33,6 +41,11 @@ export function Screen({ children, scroll = true, contentContainerStyle }: Props
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
       {content}
+      {footer ? (
+        <KeyboardStickyView testID="keyboard-sticky-footer" style={styles.footer}>
+          <View style={styles.footerContent}>{footer}</View>
+        </KeyboardStickyView>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -48,4 +61,14 @@ const styles = StyleSheet.create({
     paddingBottom: 96,
     gap: spacing.lg,
   },
+  contentWithFooter: { paddingBottom: spacing.xl },
+  footer: {
+    width: "100%",
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  footerContent: { width: "100%", maxWidth: 760, alignSelf: "center" },
 });

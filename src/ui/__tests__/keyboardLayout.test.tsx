@@ -26,4 +26,15 @@ describe("mobile keyboard layout", () => {
     expect(scrollView.props.keyboardShouldPersistTaps).toBe("handled");
     expect(scrollView.props.bottomOffset).toBe(24);
   });
+
+  it("can keep a form action in a keyboard-sticky footer", () => {
+    const view = render(
+      <Screen footer={<Text>Spara observation</Text>}>
+        <Text>Form</Text>
+      </Screen>,
+    );
+
+    expect(view.getByTestId("keyboard-sticky-footer")).toBeTruthy();
+    expect(view.getByText("Spara observation")).toBeTruthy();
+  });
 });

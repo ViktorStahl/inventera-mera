@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import type { PropsWithChildren, ReactNode } from "react";
 import {
   ScrollView,
   StyleSheet,
@@ -12,13 +12,18 @@ import { colors, spacing } from "./theme";
 type Props = PropsWithChildren<{
   scroll?: boolean;
   contentContainerStyle?: ScrollViewProps["contentContainerStyle"];
+  footer?: ReactNode;
 }>;
 
-export function Screen({ children, scroll = true, contentContainerStyle }: Props) {
+export function Screen({ children, scroll = true, contentContainerStyle, footer }: Props) {
   const content = scroll ? (
     <ScrollView
       style={styles.flex}
-      contentContainerStyle={[styles.content, contentContainerStyle]}
+      contentContainerStyle={[
+        styles.content,
+        footer ? styles.contentWithFooter : undefined,
+        contentContainerStyle,
+      ]}
       keyboardShouldPersistTaps="handled"
     >
       {children}
@@ -30,6 +35,11 @@ export function Screen({ children, scroll = true, contentContainerStyle }: Props
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
       {content}
+      {footer ? (
+        <View testID="keyboard-sticky-footer" style={styles.footer}>
+          <View style={styles.footerContent}>{footer}</View>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -45,4 +55,14 @@ const styles = StyleSheet.create({
     paddingBottom: 96,
     gap: spacing.lg,
   },
+  contentWithFooter: { paddingBottom: spacing.xl },
+  footer: {
+    width: "100%",
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  footerContent: { width: "100%", maxWidth: 760, alignSelf: "center" },
 });
