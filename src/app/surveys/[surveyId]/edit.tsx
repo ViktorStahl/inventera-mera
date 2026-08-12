@@ -2,11 +2,9 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, View } from "react-native";
 
-import { findRegion, type RegionOption } from "@/data/regions";
 import { VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
-import type { Region, SurveyDraft } from "@/domain/models";
+import type { SurveyDraft } from "@/domain/models";
 import { hasErrors, validateSurveyDraft, type ValidationErrors } from "@/domain/validation";
-import { RegionPicker } from "@/features/regions/RegionPicker";
 import { TaxonomySpeciesListFields } from "@/features/taxonomy/TaxonomySpeciesListFields";
 import { dismissToSurvey } from "@/navigation/hierarchy";
 import {
@@ -25,7 +23,6 @@ export default function EditSurveyScreen() {
   const { surveyId } = useLocalSearchParams<{ surveyId: string }>();
   const router = useRouter();
   const [draft, setDraft] = useState<SurveyDraft>();
-  const [selectedRegion, setSelectedRegion] = useState<RegionOption>();
   const [errors, setErrors] = useState<ValidationErrors<SurveyDraft>>({});
   const [hydrated, setHydrated] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -39,15 +36,11 @@ export default function EditSurveyScreen() {
             title: survey.title,
             description: survey.description ?? "",
             surveyDate: survey.surveyDate,
-            countyCode: survey.region.countyCode,
-            municipalityCode: survey.region.municipalityCode ?? "",
-            regionFreeText: survey.region.freeText ?? "",
             taxonomyPackageId: survey.taxonomyRef?.packageId ?? VASCULAR_PLANTS_TAXONOMY.packageId,
             speciesListId: survey.speciesListId ?? "",
           } satisfies SurveyDraft;
         const initial = { ...persisted, ...stored };
         setDraft(initial);
-        setSelectedRegion(findRegion(initial.countyCode, initial.municipalityCode || undefined));
       })
       .catch((error) => Alert.alert("Kunde inte öppna inventeringen", messageOf(error)))
       .finally(() => setHydrated(true));
@@ -63,8 +56,8 @@ export default function EditSurveyScreen() {
   }, [draft, hydrated, surveyId]);
 
   const canSave = useMemo(
-    () => Boolean(draft && selectedRegion && hydrated && !saving),
-    [draft, hydrated, saving, selectedRegion],
+    () => Boolean(draft && hydrated && !saving),
+    [draft, hydrated, saving],
   );
 
   function update<K extends keyof SurveyDraft>(key: K, value: SurveyDraft[K]) {
@@ -72,37 +65,14 @@ export default function EditSurveyScreen() {
     setErrors((current) => ({ ...current, [key]: undefined }));
   }
 
-  function chooseRegion(option: RegionOption) {
-    setSelectedRegion(option);
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            countyCode: option.countyCode,
-            municipalityCode: option.municipalityCode ?? "",
-          }
-        : current,
-    );
-    setErrors((current) => ({ ...current, countyCode: undefined }));
-  }
-
   async function save() {
-    if (!surveyId || !draft || !selectedRegion) return;
+    if (!surveyId || !draft) return;
     const nextErrors = validateSurveyDraft(draft);
     setErrors(nextErrors);
     if (hasErrors(nextErrors)) return;
     setSaving(true);
     try {
-      const region: Region = {
-        countyCode: selectedRegion.countyCode,
-        countyName: selectedRegion.countyName,
-        municipalityCode: selectedRegion.municipalityCode,
-        municipalityName: selectedRegion.municipalityName,
-        freeText: draft.regionFreeText.trim() || undefined,
-        source: "SCB",
-        sourceVersion: "2026",
-      };
-      await updateSurvey(surveyId, draft, region);
+      await updateSurvey(surveyId, draft);
       dismissToSurvey(router, surveyId);
     } catch (error) {
       Alert.alert("Inventeringen kunde inte sparas", messageOf(error));
@@ -144,13 +114,6 @@ export default function EditSurveyScreen() {
         placeholder="ÅÅÅÅ-MM-DD"
         keyboardType="numbers-and-punctuation"
         error={errors.surveyDate}
-      />
-      <RegionPicker value={selectedRegion} onChange={chooseRegion} error={errors.countyCode} />
-      <Field
-        label="Närmare område (valfritt)"
-        value={draft.regionFreeText}
-        onChangeText={(value) => update("regionFreeText", value)}
-        placeholder="Till exempel Lillåsen, norra delen"
       />
       <TaxonomySpeciesListFields
         taxonomyPackageId={draft.taxonomyPackageId}

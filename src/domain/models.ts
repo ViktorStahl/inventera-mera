@@ -2,16 +2,6 @@ import type { ObservationAmount, ObservationUnit } from "./amount";
 
 export type SurveyStatus = "active" | "archived";
 
-export type Region = {
-  countyCode: string;
-  countyName: string;
-  municipalityCode?: string;
-  municipalityName?: string;
-  freeText?: string;
-  source: "SCB";
-  sourceVersion: "2026";
-};
-
 export type TaxonomyReference = {
   packageId: string;
   name: string;
@@ -22,7 +12,6 @@ export type Survey = {
   id: string;
   title: string;
   description?: string;
-  region: Region;
   taxonomyRef?: TaxonomyReference;
   speciesListId?: string;
   surveyDate: string;
@@ -122,9 +111,6 @@ export type SurveyDraft = {
   title: string;
   description: string;
   surveyDate: string;
-  countyCode: string;
-  municipalityCode: string;
-  regionFreeText: string;
   taxonomyPackageId: string;
   speciesListId: string;
 };
@@ -164,7 +150,7 @@ export type ObservationDraft = {
 
 export type SurveyBackup = {
   format: "inventera-mera-backup";
-  formatVersion: 3;
+  formatVersion: 4;
   exportedAt: string;
   survey: Survey;
   locales: SurveyLocale[];

@@ -15,7 +15,6 @@ import type {
   LocaleListItem,
   Observation,
   Position,
-  Region,
   SpeciesList,
   SpeciesListEntry,
   SpeciesListSummary,
@@ -32,7 +31,7 @@ import { normalizeSpeciesName, speciesKey } from "@/domain/species";
 import { migrateLegacyObservations, type LegacyObservation } from "./migrateLocales";
 
 const DATABASE_NAME = "inventera-mera.db";
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const TAXONOMY_DATABASE_NAME = `dyntaxa-vascular-plants-${taxonomyManifest.version}.db`;
 const TAXONOMY_DATABASE_ASSET = require(
   "../../assets/taxonomies/dyntaxa-vascular-plants.db",
@@ -62,6 +61,7 @@ async function openAndMigrate(): Promise<SQLite.SQLiteDatabase> {
   if (version < 1) await migrateToVersionOne(database);
   if (version < 2) await migrateToVersionTwo(database);
   if (version < 3) await migrateToVersionThree(database);
+  if (version < 4) await migrateToVersionFour(database);
   await deleteUnsupportedAmountData(database);
   return database;
 }
@@ -323,6 +323,22 @@ async function migrateToVersionThree(database: SQLite.SQLiteDatabase): Promise<v
   });
 }
 
+async function migrateToVersionFour(database: SQLite.SQLiteDatabase): Promise<void> {
+  await database.withTransactionAsync(async () => {
+    await database.execAsync(`
+      ALTER TABLE surveys DROP COLUMN county_code;
+      ALTER TABLE surveys DROP COLUMN county_name;
+      ALTER TABLE surveys DROP COLUMN municipality_code;
+      ALTER TABLE surveys DROP COLUMN municipality_name;
+      ALTER TABLE surveys DROP COLUMN region_free_text;
+      ALTER TABLE surveys DROP COLUMN region_source;
+      ALTER TABLE surveys DROP COLUMN region_source_version;
+      DELETE FROM drafts WHERE key = 'survey:new' OR key LIKE 'survey:edit:%';
+      PRAGMA user_version = 4;
+    `);
+  });
+}
+
 export async function getAppSettings(): Promise<AppSettings> {
   const database = await getDatabase();
   const row = await database.getFirstAsync<{ default_taxonomy_package_id: string }>(
@@ -504,17 +520,11 @@ export async function listSurveys(search = ""): Promise<SurveyListItem[]> {
       WHERE surveys.status = 'active'
         AND (? = '%%' OR surveys.title LIKE ? COLLATE NOCASE
           OR coalesce(surveys.description, '') LIKE ? COLLATE NOCASE
-          OR surveys.county_name LIKE ? COLLATE NOCASE
-          OR coalesce(surveys.municipality_name, '') LIKE ? COLLATE NOCASE
-          OR coalesce(surveys.region_free_text, '') LIKE ? COLLATE NOCASE
           OR EXISTS (SELECT 1 FROM locales search_locales
               WHERE search_locales.survey_id = surveys.id
                 AND search_locales.name LIKE ? COLLATE NOCASE))
       GROUP BY surveys.id
       ORDER BY surveys.updated_at DESC`,
-    pattern,
-    pattern,
-    pattern,
     pattern,
     pattern,
     pattern,
@@ -536,7 +546,7 @@ export async function getSurvey(id: string): Promise<Survey | null> {
   return row ? surveyFromRow(row) : null;
 }
 
-export async function createSurvey(draft: SurveyDraft, region: Region): Promise<Survey> {
+export async function createSurvey(draft: SurveyDraft): Promise<Survey> {
   const database = await getDatabase();
   const taxonomy = findTaxonomy(draft.taxonomyPackageId);
   if (!taxonomy) throw new Error("Taxonomin kunde inte hittas.");
@@ -550,7 +560,6 @@ export async function createSurvey(draft: SurveyDraft, region: Region): Promise<
     id: Crypto.randomUUID(),
     title: draft.title.trim(),
     description: optionalText(draft.description),
-    region,
     taxonomyRef: taxonomyReference(taxonomy),
     speciesListId: speciesList?.id,
     surveyDate: draft.surveyDate,
@@ -566,7 +575,6 @@ export async function createSurvey(draft: SurveyDraft, region: Region): Promise<
 export async function updateSurvey(
   id: string,
   draft: SurveyDraft,
-  region: Region,
 ): Promise<Survey> {
   const database = await getDatabase();
   const existing = await getSurvey(id);
@@ -582,7 +590,6 @@ export async function updateSurvey(
     ...existing,
     title: draft.title.trim(),
     description: optionalText(draft.description),
-    region,
     taxonomyRef: taxonomyReference(taxonomy),
     speciesListId: speciesList?.id,
     surveyDate: draft.surveyDate,
@@ -591,20 +598,11 @@ export async function updateSurvey(
   await database.withTransactionAsync(async () => {
     const result = await database.runAsync(
       `UPDATE surveys SET
-        title = ?, description = ?, county_code = ?, county_name = ?,
-        municipality_code = ?, municipality_name = ?, region_free_text = ?,
-        region_source = ?, region_source_version = ?, taxonomy_json = ?,
-        species_list_id = ?, survey_date = ?, updated_at = ?
+        title = ?, description = ?, taxonomy_json = ?, species_list_id = ?,
+        survey_date = ?, updated_at = ?
        WHERE id = ?`,
       updated.title,
       updated.description ?? null,
-      updated.region.countyCode,
-      updated.region.countyName,
-      updated.region.municipalityCode ?? null,
-      updated.region.municipalityName ?? null,
-      updated.region.freeText ?? null,
-      updated.region.source,
-      updated.region.sourceVersion,
       JSON.stringify(updated.taxonomyRef),
       updated.speciesListId ?? null,
       updated.surveyDate,
@@ -1062,7 +1060,7 @@ export async function buildSurveyBackup(surveyId: string): Promise<SurveyBackup>
     : null;
   return {
     format: "inventera-mera-backup",
-    formatVersion: 3,
+    formatVersion: 4,
     exportedAt: new Date().toISOString(),
     survey,
     locales: (await listLocales(surveyId)).map(({ observationCount: _, ...locale }) => locale),
@@ -1128,7 +1126,7 @@ function normalizeBackup(value: unknown): SurveyBackup {
   if (backup.format !== "inventera-mera-backup" || !backup.survey) {
     throw new Error("Backupformatet stöds inte.");
   }
-  const survey = backup.survey as Survey;
+  const survey = surveyWithoutRegion(backup.survey);
   if (backup.formatVersion === 1 && Array.isArray(backup.observations)) {
     const migrated = migrateLegacyObservations(
       (backup.observations as LegacyObservation[]).filter((observation) =>
@@ -1138,7 +1136,7 @@ function normalizeBackup(value: unknown): SurveyBackup {
     );
     return {
       format: "inventera-mera-backup",
-      formatVersion: 3,
+      formatVersion: 4,
       exportedAt:
         typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString(),
       survey,
@@ -1153,7 +1151,7 @@ function normalizeBackup(value: unknown): SurveyBackup {
   ) {
     return {
       format: "inventera-mera-backup",
-      formatVersion: 3,
+      formatVersion: 4,
       exportedAt:
         typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString(),
       survey,
@@ -1164,7 +1162,7 @@ function normalizeBackup(value: unknown): SurveyBackup {
     };
   }
   if (
-    backup.formatVersion !== 3 ||
+    (backup.formatVersion !== 3 && backup.formatVersion !== 4) ||
     !Array.isArray(backup.locales) ||
     !Array.isArray(backup.observations)
   ) {
@@ -1181,7 +1179,7 @@ function normalizeBackup(value: unknown): SurveyBackup {
   ) {
     throw new Error("Backupens artlista är ogiltig.");
   }
-  const normalized = backup as unknown as SurveyBackup;
+  const normalized = { ...backup, survey, formatVersion: 4 } as unknown as SurveyBackup;
   if (normalized.locales.some((locale) => locale.surveyId !== survey.id)) {
     throw new Error("Backupen innehåller lokaler från en annan inventering.");
   }
@@ -1310,21 +1308,12 @@ async function insertSurvey(
   const command = replace ? "INSERT OR REPLACE" : "INSERT";
   await database.runAsync(
     `${command} INTO surveys (
-      id, title, description, county_code, county_name, municipality_code,
-      municipality_name, region_free_text, region_source,
-      region_source_version, taxonomy_json, species_list_id, survey_date, status,
+      id, title, description, taxonomy_json, species_list_id, survey_date, status,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     survey.id,
     survey.title,
     survey.description ?? null,
-    survey.region.countyCode,
-    survey.region.countyName,
-    survey.region.municipalityCode ?? null,
-    survey.region.municipalityName ?? null,
-    survey.region.freeText ?? null,
-    survey.region.source,
-    survey.region.sourceVersion,
     survey.taxonomyRef ? JSON.stringify(survey.taxonomyRef) : null,
     survey.speciesListId ?? null,
     survey.surveyDate,
@@ -1465,15 +1454,6 @@ function surveyFromRow(row: SurveyRow): Survey {
     id: row.id,
     title: row.title,
     description: row.description ?? undefined,
-    region: {
-      countyCode: row.county_code,
-      countyName: row.county_name,
-      municipalityCode: row.municipality_code ?? undefined,
-      municipalityName: row.municipality_name ?? undefined,
-      freeText: row.region_free_text ?? undefined,
-      source: "SCB",
-      sourceVersion: "2026",
-    },
     taxonomyRef: row.taxonomy_json
       ? (JSON.parse(row.taxonomy_json) as TaxonomyReference)
       : undefined,
@@ -1632,6 +1612,15 @@ function optionalText(value: string): string | undefined {
   return trimmed || undefined;
 }
 
+function surveyWithoutRegion(value: unknown): Survey {
+  if (!value || typeof value !== "object") {
+    throw new Error("Backupens inventering är ogiltig.");
+  }
+  const survey = { ...(value as Record<string, unknown>) };
+  delete survey.region;
+  return survey as Survey;
+}
+
 function taxonomyReference(taxonomy: TaxonomyReference): TaxonomyReference {
   return {
     packageId: taxonomy.packageId,
@@ -1644,13 +1633,6 @@ type SurveyRow = {
   id: string;
   title: string;
   description: string | null;
-  county_code: string;
-  county_name: string;
-  municipality_code: string | null;
-  municipality_name: string | null;
-  region_free_text: string | null;
-  region_source: string;
-  region_source_version: string;
   taxonomy_json: string | null;
   species_list_id: string | null;
   survey_date: string;

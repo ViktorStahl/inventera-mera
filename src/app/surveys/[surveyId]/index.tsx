@@ -107,10 +107,6 @@ export default function SurveyDetailScreen() {
         <Text style={styles.surveyTitle}>{survey.title}</Text>
         {survey.description ? <Text style={styles.description}>{survey.description}</Text> : null}
         <Text style={styles.meta}>▣ {survey.surveyDate}</Text>
-        <Text style={styles.meta}>
-          ⌖ {survey.region.municipalityName ?? survey.region.countyName}
-          {survey.region.freeText ? ` · ${survey.region.freeText}` : ""}
-        </Text>
         <Text style={styles.meta}>♧ {survey.taxonomyRef?.name ?? "Fritext"}</Text>
         <Text style={styles.meta}>☷ Artlista: {speciesList?.name ?? "Ingen"}</Text>
       </Card>

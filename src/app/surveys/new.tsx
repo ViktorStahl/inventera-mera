@@ -2,12 +2,10 @@ import { Stack, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, StyleSheet, View } from "react-native";
 
-import { findRegion, type RegionOption } from "@/data/regions";
 import { VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
-import type { Region, SurveyDraft } from "@/domain/models";
+import type { SurveyDraft } from "@/domain/models";
 import { todayLocal } from "@/domain/time";
 import { hasErrors, validateSurveyDraft, type ValidationErrors } from "@/domain/validation";
-import { RegionPicker } from "@/features/regions/RegionPicker";
 import { TaxonomySpeciesListFields } from "@/features/taxonomy/TaxonomySpeciesListFields";
 import { dismissToSurvey } from "@/navigation/hierarchy";
 import { createSurvey, getAppSettings, loadDraft, saveDraft } from "@/storage/database";
@@ -20,9 +18,6 @@ const EMPTY_DRAFT: SurveyDraft = {
   title: "",
   description: "",
   surveyDate: todayLocal(),
-  countyCode: "",
-  municipalityCode: "",
-  regionFreeText: "",
   taxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId,
   speciesListId: "",
 };
@@ -30,7 +25,6 @@ const EMPTY_DRAFT: SurveyDraft = {
 export default function NewSurveyScreen() {
   const router = useRouter();
   const [draft, setDraft] = useState<SurveyDraft>(EMPTY_DRAFT);
-  const [selectedRegion, setSelectedRegion] = useState<RegionOption>();
   const [errors, setErrors] = useState<ValidationErrors<SurveyDraft>>({});
   const [hydrated, setHydrated] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -44,9 +38,6 @@ export default function NewSurveyScreen() {
           ...stored,
         };
         setDraft(initial);
-        if (initial.countyCode) {
-          setSelectedRegion(findRegion(initial.countyCode, initial.municipalityCode || undefined));
-        }
       })
       .finally(() => setHydrated(true));
   }, []);
@@ -64,32 +55,13 @@ export default function NewSurveyScreen() {
     setErrors((current) => ({ ...current, [key]: undefined }));
   }
 
-  function chooseRegion(option: RegionOption) {
-    setSelectedRegion(option);
-    setDraft((current) => ({
-      ...current,
-      countyCode: option.countyCode,
-      municipalityCode: option.municipalityCode ?? "",
-    }));
-    setErrors((current) => ({ ...current, countyCode: undefined }));
-  }
-
   async function save() {
     const nextErrors = validateSurveyDraft(draft);
     setErrors(nextErrors);
-    if (hasErrors(nextErrors) || !selectedRegion) return;
+    if (hasErrors(nextErrors)) return;
     setSaving(true);
     try {
-      const region: Region = {
-        countyCode: selectedRegion.countyCode,
-        countyName: selectedRegion.countyName,
-        municipalityCode: selectedRegion.municipalityCode,
-        municipalityName: selectedRegion.municipalityName,
-        freeText: draft.regionFreeText.trim() || undefined,
-        source: "SCB",
-        sourceVersion: "2026",
-      };
-      const survey = await createSurvey(draft, region);
+      const survey = await createSurvey(draft);
       dismissToSurvey(router, survey.id);
     } catch (error) {
       Alert.alert("Inventeringen kunde inte sparas", messageOf(error));
@@ -123,13 +95,6 @@ export default function NewSurveyScreen() {
         placeholder="ÅÅÅÅ-MM-DD"
         keyboardType="numbers-and-punctuation"
         error={errors.surveyDate}
-      />
-      <RegionPicker value={selectedRegion} onChange={chooseRegion} error={errors.countyCode} />
-      <Field
-        label="Närmare område (valfritt)"
-        value={draft.regionFreeText}
-        onChangeText={(value) => update("regionFreeText", value)}
-        placeholder="Till exempel Lillåsen, norra delen"
       />
       <TaxonomySpeciesListFields
         taxonomyPackageId={draft.taxonomyPackageId}

@@ -58,16 +58,6 @@ export function createSurveyWorkbook(
     [stringCell("Inventerings-ID"), stringCell(survey.id)],
     [stringCell("Titel"), safeStringCell(survey.title)],
     [stringCell("Beskrivning"), safeStringCell(survey.description ?? "")],
-    [stringCell("Län"), safeStringCell(`${survey.region.countyCode} ${survey.region.countyName}`)],
-    [
-      stringCell("Kommun"),
-      safeStringCell(
-        survey.region.municipalityCode
-          ? `${survey.region.municipalityCode} ${survey.region.municipalityName ?? ""}`.trim()
-          : "",
-      ),
-    ],
-    [stringCell("Område"), safeStringCell(survey.region.freeText ?? "")],
     [stringCell("Inventeringsdatum"), stringCell(survey.surveyDate)],
     [stringCell("Taxonomi"), safeStringCell(survey.taxonomyRef?.name ?? "Ingen")],
     [stringCell("Taxonomiversion"), safeStringCell(survey.taxonomyRef?.version ?? "")],
@@ -76,7 +66,7 @@ export function createSurveyWorkbook(
     [stringCell("Antal lokaler"), numberCell(locales.length)],
     [stringCell("Antal observationer"), numberCell(observations.length)],
     [stringCell("Exporterad"), stringCell(new Date().toISOString())],
-    [stringCell("Schemaversion"), numberCell(3)],
+    [stringCell("Schemaversion"), numberCell(4)],
   ];
 
   const localeHeaders = [

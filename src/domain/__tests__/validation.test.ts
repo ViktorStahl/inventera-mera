@@ -1,5 +1,24 @@
-import type { LocaleDraft, ObservationDraft } from "../models";
-import { parseAdditionalObservers, validateLocaleDraft, validateObservationDraft } from "../validation";
+import type { LocaleDraft, ObservationDraft, SurveyDraft } from "../models";
+import {
+  parseAdditionalObservers,
+  validateLocaleDraft,
+  validateObservationDraft,
+  validateSurveyDraft,
+} from "../validation";
+
+describe("survey validation", () => {
+  it("accepts a survey without county or municipality data", () => {
+    const draft: SurveyDraft = {
+      title: "Ängsmark vid Lillåsen",
+      description: "",
+      surveyDate: "2026-08-12",
+      taxonomyPackageId: "dyntaxa-vascular-plants",
+      speciesListId: "",
+    };
+
+    expect(validateSurveyDraft(draft)).toEqual({});
+  });
+});
 
 const validDraft: ObservationDraft = {
   date: "2026-07-31",

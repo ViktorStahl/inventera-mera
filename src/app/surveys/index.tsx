@@ -87,7 +87,7 @@ export default function SurveyListScreen() {
               label="Sök inventeringar"
               value={search}
               onChangeText={setSearch}
-              placeholder="Titel, län, kommun eller område"
+              placeholder="Titel, beskrivning eller lokal"
               returnKeyType="search"
             />
           </View>
@@ -115,9 +115,7 @@ export default function SurveyListScreen() {
                 <Text style={styles.cardMeta}>
                   {item.localeCount} {item.localeCount === 1 ? "lokal" : "lokaler"} · {item.observationCount} {item.observationCount === 1 ? "observation" : "observationer"}
                 </Text>
-                <Text style={styles.cardMeta}>
-                  {item.region.municipalityName ?? item.region.countyName} · {item.surveyDate}
-                </Text>
+                <Text style={styles.cardMeta}>{item.surveyDate}</Text>
               </View>
               <Text style={styles.chevron}>›</Text>
             </View>

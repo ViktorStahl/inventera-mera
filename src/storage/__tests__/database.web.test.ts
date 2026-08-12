@@ -1,4 +1,4 @@
-import type { Observation, Region, SurveyDraft, SurveyLocale } from "@/domain/models";
+import type { Observation, SurveyDraft, SurveyLocale } from "@/domain/models";
 import { VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
 import { taxonomySpeciesSnapshot } from "@/domain/species";
 import * as repository from "../database.web";
@@ -21,16 +21,38 @@ describe("browser storage", () => {
     const storage = new MemoryStorage();
     storage.setItem("inventera-mera:web:v1", JSON.stringify({
       schemaVersion: 3,
-      surveys: [],
+      surveys: [{
+        id: "legacy-survey",
+        title: "Äldre inventering",
+        region: {
+          countyCode: "14",
+          countyName: "Västra Götalands län",
+          source: "SCB",
+          sourceVersion: "2026",
+        },
+        taxonomyRef: VASCULAR_PLANTS_TAXONOMY,
+        surveyDate: "2026-07-30",
+        status: "active",
+        createdAt: "2026-07-30T08:00:00.000Z",
+        updatedAt: "2026-07-30T08:00:00.000Z",
+      }],
       locales: [],
       observations: [{ id: "ogiltig", amount: { value: 1, unit: "individer" } }],
       speciesLists: [],
       speciesListEntries: [],
       settings: { defaultTaxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId },
-      drafts: { "observation:new:legacy": { amount: "1", unit: "individer" } },
+      drafts: {
+        "survey:new": { title: "Gammalt regionutkast", countyCode: "14" },
+        "observation:new:legacy": { amount: "1", unit: "individer" },
+      },
     }));
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
-    expect((await repository.getDatabase()).observations).toEqual([]);
+    const migratedDatabase = await repository.getDatabase();
+    expect(migratedDatabase.schemaVersion).toBe(4);
+    expect(migratedDatabase.surveys[0]).not.toHaveProperty("region");
+    expect(migratedDatabase.observations).toEqual([]);
+    expect(await repository.loadDraft("survey:new")).toBeNull();
+    await repository.deleteSurvey("legacy-survey");
     const speciesList = await repository.createSpeciesList("Fjällväxter", VASCULAR_PLANTS_TAXONOMY);
     const listTaxon = (await repository.searchTaxa("ängskovall"))[0]!;
     await repository.addSpeciesToList(
@@ -58,26 +80,14 @@ describe("browser storage", () => {
       title: "Ängsmark",
       description: "",
       surveyDate: "2026-07-31",
-      countyCode: "14",
-      municipalityCode: "1480",
-      regionFreeText: "Lillåsen",
       taxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId,
       speciesListId: speciesList.id,
-    };
-    const region: Region = {
-      countyCode: "14",
-      countyName: "Västra Götalands län",
-      municipalityCode: "1480",
-      municipalityName: "Göteborg",
-      freeText: "Lillåsen",
-      source: "SCB",
-      sourceVersion: "2026",
     };
 
     expect(await repository.loadDraft("observation:new:legacy")).toBeNull();
     await repository.saveDraft("survey:new", draft);
     expect(await repository.loadDraft("survey:new")).toEqual(draft);
-    const survey = await repository.createSurvey(draft, region);
+    const survey = await repository.createSurvey(draft);
     expect((await repository.listSurveys())[0]).toMatchObject({ id: survey.id, localeCount: 0, observationCount: 0 });
     expect(await repository.loadDraft("survey:new")).toBeNull();
     expect((await repository.searchTaxa("angsvadd"))[0]?.preferredName).toBe("ängsvädd");
@@ -172,11 +182,12 @@ describe("browser storage", () => {
 
     const backup = await repository.buildSurveyBackup(survey.id);
     expect(backup).toMatchObject({
-      formatVersion: 3,
+      formatVersion: 4,
       locales: [{ id: locale.id }],
       speciesList: { list: { id: speciesList.id }, entries: expect.any(Array) },
     });
     expect(backup.locales[0]).not.toHaveProperty("observationCount");
+    expect(backup.survey).not.toHaveProperty("region");
     const firstBackedUpEntry = backup.speciesList?.entries[0];
     expect(firstBackedUpEntry).toBeDefined();
     await expect(repository.restoreSurveyBackup({
@@ -195,7 +206,21 @@ describe("browser storage", () => {
     expect(await repository.getLocale(survey.id, locale.id)).toBeNull();
     expect(await repository.listObservations(survey.id)).toEqual([]);
 
-    expect(await repository.restoreSurveyBackup(backup)).toBe(survey.id);
+    const legacyRegionBackup = {
+      ...backup,
+      formatVersion: 3,
+      survey: {
+        ...backup.survey,
+        region: {
+          countyCode: "14",
+          countyName: "Västra Götalands län",
+          source: "SCB",
+          sourceVersion: "2026",
+        },
+      },
+    };
+    expect(await repository.restoreSurveyBackup(legacyRegionBackup)).toBe(survey.id);
+    expect(await repository.getSurvey(survey.id)).not.toHaveProperty("region");
     expect(
       await repository.speciesListContains(speciesList.id, {
         source: "free-text",

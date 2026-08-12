@@ -11,7 +11,6 @@ import type {
   AppSettings,
   LocaleListItem,
   Observation,
-  Region,
   SpeciesList,
   SpeciesListEntry,
   SpeciesListSummary,
@@ -28,7 +27,7 @@ import { normalizeSpeciesName, speciesKey } from "@/domain/species";
 import { migrateLegacyObservations, type LegacyObservation } from "./migrateLocales";
 
 const STORAGE_KEY = "inventera-mera:web:v1";
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 type PackagedTaxon = [
   id: string,
@@ -42,7 +41,7 @@ type PackagedTaxon = [
 const PACKAGED_TAXA = packagedTaxonomy.taxa as PackagedTaxon[];
 
 type BrowserDatabase = {
-  schemaVersion: 3;
+  schemaVersion: 4;
   surveys: Survey[];
   locales: SurveyLocale[];
   observations: Observation[];
@@ -215,9 +214,6 @@ export async function listSurveys(search = ""): Promise<SurveyListItem[]> {
       return [
         survey.title,
         survey.description,
-        survey.region.countyName,
-        survey.region.municipalityName,
-        survey.region.freeText,
         ...state.locales
           .filter((locale) => locale.surveyId === survey.id)
           .map((locale) => locale.name),
@@ -240,7 +236,7 @@ export async function getSurvey(id: string): Promise<Survey | null> {
   return state.surveys.find((survey) => survey.id === id) ?? null;
 }
 
-export async function createSurvey(draft: SurveyDraft, region: Region): Promise<Survey> {
+export async function createSurvey(draft: SurveyDraft): Promise<Survey> {
   const state = await getDatabase();
   const taxonomy = findTaxonomy(draft.taxonomyPackageId);
   if (!taxonomy) throw new Error("Taxonomin kunde inte hittas.");
@@ -256,7 +252,6 @@ export async function createSurvey(draft: SurveyDraft, region: Region): Promise<
     id: Crypto.randomUUID(),
     title: draft.title.trim(),
     description: optionalText(draft.description),
-    region,
     taxonomyRef: taxonomyReference(taxonomy),
     speciesListId: speciesList?.id,
     surveyDate: draft.surveyDate,
@@ -273,7 +268,6 @@ export async function createSurvey(draft: SurveyDraft, region: Region): Promise<
 export async function updateSurvey(
   id: string,
   draft: SurveyDraft,
-  region: Region,
 ): Promise<Survey> {
   const state = await getDatabase();
   const index = state.surveys.findIndex((survey) => survey.id === id);
@@ -292,7 +286,6 @@ export async function updateSurvey(
     ...existing,
     title: draft.title.trim(),
     description: optionalText(draft.description),
-    region,
     taxonomyRef: taxonomyReference(taxonomy),
     speciesListId: speciesList?.id,
     surveyDate: draft.surveyDate,
@@ -648,7 +641,7 @@ export async function buildSurveyBackup(surveyId: string): Promise<SurveyBackup>
   const speciesList = survey.speciesListId ? await getSpeciesList(survey.speciesListId) : null;
   return {
     format: "inventera-mera-backup",
-    formatVersion: 3,
+    formatVersion: 4,
     exportedAt: new Date().toISOString(),
     survey,
     locales: (await listLocales(surveyId)).map(({ observationCount: _, ...locale }) => locale),
@@ -754,8 +747,8 @@ function readOrMigrateDatabase(value: unknown): BrowserDatabase {
       () => Crypto.randomUUID(),
     );
     return {
-      schemaVersion: 3,
-      surveys: candidate.surveys as Survey[],
+      schemaVersion: 4,
+      surveys: (candidate.surveys as unknown[]).map(surveyWithoutRegion),
       locales: migrated.locales,
       observations: migrated.observations,
       speciesLists: [],
@@ -773,18 +766,20 @@ function readOrMigrateDatabase(value: unknown): BrowserDatabase {
       throw new Error("Databasversionen stöds inte.");
     }
     return {
-      schemaVersion: 3,
-      surveys: candidate.surveys as Survey[],
+      schemaVersion: 4,
+      surveys: (candidate.surveys as unknown[]).map(surveyWithoutRegion),
       locales: candidate.locales as SurveyLocale[],
       observations: candidate.observations as Observation[],
       speciesLists: [],
       speciesListEntries: [],
       settings: { defaultTaxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId },
-      drafts: (candidate.drafts as Record<string, unknown> | undefined) ?? {},
+      drafts: withoutObsoleteSurveyDrafts(
+        (candidate.drafts as Record<string, unknown> | undefined) ?? {},
+      ),
     };
   }
   if (
-    candidate.schemaVersion !== SCHEMA_VERSION ||
+    (candidate.schemaVersion !== 3 && candidate.schemaVersion !== SCHEMA_VERSION) ||
     !Array.isArray(candidate.surveys) ||
     !Array.isArray(candidate.locales) ||
     !Array.isArray(candidate.observations) ||
@@ -796,7 +791,11 @@ function readOrMigrateDatabase(value: unknown): BrowserDatabase {
   ) {
     throw new Error("Databasversionen stöds inte.");
   }
-  return candidate as BrowserDatabase;
+  const migrated = candidate as unknown as BrowserDatabase;
+  migrated.schemaVersion = 4;
+  migrated.surveys = (candidate.surveys as unknown[]).map(surveyWithoutRegion);
+  migrated.drafts = withoutObsoleteSurveyDrafts(migrated.drafts);
+  return migrated;
 }
 
 function normalizeBackup(value: unknown): SurveyBackup {
@@ -805,7 +804,7 @@ function normalizeBackup(value: unknown): SurveyBackup {
   if (backup.format !== "inventera-mera-backup" || !backup.survey) {
     throw new Error("Backupformatet stöds inte.");
   }
-  const survey = backup.survey as Survey;
+  const survey = surveyWithoutRegion(backup.survey);
   if (backup.formatVersion === 1 && Array.isArray(backup.observations)) {
     const migrated = migrateLegacyObservations(
       (backup.observations as LegacyObservation[]).filter((observation) =>
@@ -815,7 +814,7 @@ function normalizeBackup(value: unknown): SurveyBackup {
     );
     return {
       format: "inventera-mera-backup",
-      formatVersion: 3,
+      formatVersion: 4,
       exportedAt:
         typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString(),
       survey,
@@ -830,7 +829,7 @@ function normalizeBackup(value: unknown): SurveyBackup {
   ) {
     return {
       format: "inventera-mera-backup",
-      formatVersion: 3,
+      formatVersion: 4,
       exportedAt:
         typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString(),
       survey,
@@ -841,7 +840,7 @@ function normalizeBackup(value: unknown): SurveyBackup {
     };
   }
   if (
-    backup.formatVersion !== 3 ||
+    (backup.formatVersion !== 3 && backup.formatVersion !== 4) ||
     !Array.isArray(backup.locales) ||
     !Array.isArray(backup.observations)
   ) {
@@ -858,7 +857,7 @@ function normalizeBackup(value: unknown): SurveyBackup {
   ) {
     throw new Error("Backupens artlista är ogiltig.");
   }
-  const normalized = backup as unknown as SurveyBackup;
+  const normalized = { ...backup, survey, formatVersion: 4 } as unknown as SurveyBackup;
   if (normalized.locales.some((locale) => locale.surveyId !== survey.id)) {
     throw new Error("Backupen innehåller lokaler från en annan inventering.");
   }
@@ -922,6 +921,23 @@ function observationDraftHasSupportedUnit(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const unit = (value as { unit?: unknown }).unit;
   return unit === undefined || unit === "" || isObservationUnit(unit);
+}
+
+function surveyWithoutRegion(value: unknown): Survey {
+  if (!value || typeof value !== "object") {
+    throw new Error("Inventeringen är ogiltig.");
+  }
+  const survey = { ...(value as Record<string, unknown>) };
+  delete survey.region;
+  return survey as Survey;
+}
+
+function withoutObsoleteSurveyDrafts(drafts: Record<string, unknown>): Record<string, unknown> {
+  const migrated = { ...drafts };
+  for (const key of Object.keys(migrated)) {
+    if (key === "survey:new" || key.startsWith("survey:edit:")) delete migrated[key];
+  }
+  return migrated;
 }
 
 function deleteSurveyDrafts(state: BrowserDatabase, surveyId: string): void {

@@ -11,14 +11,6 @@ import {
 const survey: Survey = {
   id: "survey-1",
   title: "Ängsmark vid Lillåsen",
-  region: {
-    countyCode: "14",
-    countyName: "Västra Götalands län",
-    municipalityCode: "1480",
-    municipalityName: "Göteborg",
-    source: "SCB",
-    sourceVersion: "2026",
-  },
   taxonomyRef: { packageId: "vascular-plants-starter", name: "Kärlväxter – startlista", version: "2026-07-mvp" },
   surveyDate: "2026-07-31",
   status: "active",
@@ -114,6 +106,9 @@ describe("Excel export", () => {
     const sheet = strFromU8(files["xl/worksheets/sheet1.xml"]!);
     expect(sheet).toContain(">Artlista</t>");
     expect(sheet).toContain(">Fjällväxter</t>");
+    expect(sheet).not.toContain(">Län</t>");
+    expect(sheet).not.toContain(">Kommun</t>");
+    expect(sheet).not.toContain(">Område</t>");
   });
 
   it("sanitizes unsafe file names", () => {

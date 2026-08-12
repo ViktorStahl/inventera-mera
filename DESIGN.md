@@ -14,7 +14,7 @@ the current Android Gradle Plugin 8.12 declares JDK 17 as its default.
 
 The repository contains a working local-only MVP for the requested core flow:
 survey list/search/create/open, locale creation, observations within locales,
-draft recovery, SCB county/municipality selection, offline Dyntaxa taxonomy
+draft recovery, offline Dyntaxa taxonomy
 search with free text, reusable species lists with list-first suggestions and a
 default-taxonomy setting, RT90 input and device-position conversion, map filtering,
 Excel export, JSON backup/restore, and offline editing and permanent deletion of
@@ -39,7 +39,7 @@ archiving remain post-MVP items described below, not claims about the current ap
 
 Inventera mera is a React Native mobile application, built with Expo and
 TypeScript, for recording wild-plant observations in the field. A user creates
-a survey for a region, chooses a downloaded or custom taxonomy, creates named
+a survey, chooses a downloaded or custom taxonomy, creates named
 locales with a time and RT90 coordinate, records observations within those
 locales, reviews them in a list or on a map, and exports the survey to an Excel
 workbook. The supported production targets
@@ -96,8 +96,8 @@ independent of platform views where practical.
 - The MVP is local-only. It has no account, login, server-side survey storage,
   or synchronization. JSON backup/restore is the lossless transfer mechanism,
   while Excel is the human/external-system export.
-- A survey region is selected from searchable Swedish counties and
-  municipalities, with optional free text for a more specific area.
+- Surveys do not store a county, municipality, region code, or free-text area.
+  Location context belongs to named locales and their coordinates.
 - Amount is optional. When an amount is entered, a unit is required and must be
   one of `stjälkar/strån/skott`, `plantor/tuvor`, `m2`, `dm2`, or `cm2`.
   Custom unit text is not supported. Tapping the selected unit again clears it.
@@ -152,6 +152,10 @@ independent of platform views where practical.
 - SQLite schema v3 adds species lists, list entries, a nullable survey/list
   relation, and application settings. Deleting a list deletes its entries and
   detaches it from surveys; it never deletes or rewrites observations.
+- SQLite schema v4 removes all survey region columns and discards saved survey
+  form drafts from the earlier shape. Existing surveys, locales, observations,
+  taxonomy selections, and species-list relations are preserved. Browser data
+  and restored backup versions 1–3 likewise discard obsolete survey region data.
 
 ## 3. Primary user and core journeys
 
@@ -165,7 +169,7 @@ drafts over dense desktop controls.
 1. Install and open the mobile application.
 2. Download the vascular-plant taxonomy or import a custom taxonomy; optionally
    prepare a reusable species list.
-3. Create a survey and choose its region, taxonomy, and optional species list.
+3. Create a survey and choose its taxonomy and optional species list.
 4. Optionally download a map package covering the field area.
 5. See an explicit `Ready offline` status for the app, taxonomy, survey, and
    optional map package.
@@ -197,7 +201,7 @@ drafts over dense desktop controls.
 | Route | Screen | Purpose |
 | --- | --- | --- |
 | `/surveys` | Survey list | Search and open surveys; show count and date |
-| `/surveys/new` | Create survey | Define title, description, region, taxonomy, and optional species list |
+| `/surveys/new` | Create survey | Define title, description, taxonomy, and optional species list |
 | `/surveys/:surveyId` | Survey detail | Locale list and survey summary |
 | `/surveys/:surveyId/locales/new` | Add locale | Capture locale name, time, coordinate, and note |
 | `/surveys/:surveyId/locales/:localeId` | Locale detail | Observation list and locale summary |
@@ -230,9 +234,9 @@ the locale twice.
 ### 5.1 Survey list
 
 - Sticky app bar with app title and connection/offline-readiness status.
-- Search by survey title, description, or region, case- and accent-insensitive.
+- Search by survey title, description, or locale name, case- and accent-insensitive.
 - Default order: most recently updated first; allow title and survey-date sort.
-- Each card shows title, locale and observation counts, survey date, region, and a chevron.
+- Each card shows title, locale and observation counts, survey date, and a chevron.
 - Empty state explains how to create the first survey; no-results state keeps
   the search visible.
 - Floating add button opens the create-survey screen and has an accessible
@@ -240,7 +244,7 @@ the locale twice.
 
 ### 5.2 Create/edit survey
 
-- Required: title and a county or municipality.
+- Required: title, survey date, and taxonomy.
 - Optional: description.
 - Taxonomy: one downloaded Dyntaxa/custom package. It defaults from application
   settings and is required for a new survey.
@@ -249,18 +253,13 @@ the locale twice.
   other survey fields. Changing taxonomy clears an incompatible list choice.
 - A taxonomy that is not present locally cannot be chosen for offline use; the
   screen offers a download/import action without losing entered form values.
-- The region picker searches the current, bundled SCB county/municipality list
-  by name and code. Choosing a municipality also records its county. An
-  optional free-text field captures a more specific area. Region data is
-  versioned with its SCB source year. It is descriptive and helps choose a map
-  package; it does not constrain where observations may be saved.
 - Saving is atomic. On success, navigate to the new survey.
 
 ### 5.3 Open survey
 
 - App bar contains back, survey title, and an overflow menu.
 - Summary shows survey date, taxonomy name/version, selected species-list name
-  (or `Ingen`), region, and offline status.
+  (or `Ingen`), and offline status.
 - Tabs are `Locales (n)` and `Map`; they remain reachable with screen
   readers and preserve scroll/viewport state when switching.
 - Each locale row shows name, date/time, and observation count. Opening a locale
@@ -380,16 +379,6 @@ type Survey = {
   id: string;
   title: string;
   description?: string;
-  region: {
-    countyCode: string;
-    countyName: string;
-    municipalityCode?: string;
-    municipalityName?: string;
-    freeText?: string;
-    source: "SCB";
-    sourceVersion: string;
-    boundingBoxWgs84?: [west: number, south: number, east: number, north: number];
-  };
   taxonomyRef?: {
     packageId: string;
     name: string;
@@ -728,10 +717,14 @@ user confirmation before removing downloaded data.
   `species_list_entries`, `surveys.species_list_id`, and the singleton
   `app_settings` row. Old observation drafts default the new add-to-list flag to
   false; an existing user edit is never overwritten.
-- JSON backup format v3 includes the survey's currently selected species list
+- The schema v3 → v4 migration preserves surveys and their child records while
+  removing the seven obsolete survey-region columns. Survey create/edit drafts
+  are discarded because their saved shape contains those removed fields.
+- JSON backup format v4 includes the survey's currently selected species list
   and all of its entries. Restore validates the relation and taxonomy. If the
   same shared list already exists locally, restore merges missing entries
-  without deleting newer local entries.
+  without deleting newer local entries. Restoring formats v1–v3 is supported,
+  but any legacy survey-region object is deliberately discarded.
 - The fixed amount-unit decision does not add a SQLite schema migration. On
   startup, native and browser repositories permanently delete observations
   whose amount is negative, partial, or uses another unit, and discard
@@ -805,7 +798,6 @@ or document directory, without uploading data. The workbook contains:
 | Survey ID | UUID |
 | Title | Survey title |
 | Description | Optional description |
-| Region | County and optional municipality/free-text area, with SCB codes |
 | Survey date | ISO date |
 | Taxonomy | Name, source, and version |
 | Species list | Selected list name, or `Ingen` |
@@ -930,8 +922,8 @@ explicit backups.
 - Coordinate control points, bounds, axis order, and round trips.
 - Dyntaxa subtree/rank selection, package manifest consistency, taxonomy
   normalization/ranking, and CSV import validation.
-- Species-list identity, list-first ranking, shared-list deletion, schema v3,
-  and backup merge behaviour.
+- Species-list identity, list-first ranking, shared-list deletion, schema v3/v4
+  migrations (including region removal), and backup merge behaviour.
 - File-name/cell sanitization, workbook column mapping, and GPS-accuracy class
   boundaries.
 - Date/time-zone and daylight-saving boundaries.
@@ -1031,7 +1023,6 @@ corresponding feature is finalized:
 - [OpenTopography developer resources](https://opentopography.org/developers)
 - [Lantmäteriet: Topografi 10 Nedladdning, vektor](https://www.lantmateriet.se/sv/geodata/vara-produkter/produktlista/topografi-10-nedladdning-vektor/)
 - [Lantmäteriet: downloadable topographic-map alternatives](https://www.lantmateriet.se/sv/geodata/vara-produkter/Produktnyheter/Geografisk-information/avveckling-av-produkten-topografisk-webbkarta-visning-oversiktlig/)
-- [SCB: county and municipality codes](https://www.scb.se/hitta-statistik/regional-statistik-och-kartor/regionala-indelningar/lan-och-kommuner/)
 - [Mapbox: mobile offline maps](https://docs.mapbox.com/help/dive-deeper/mobile-offline/)
 - [MapTiler: mobile and offline map options](https://docs.maptiler.com/guides/maps-apis/maps-platform/how-to-build-mobile-apps-with-maps-using-sdk/)
 - [MapTiler Cloud terms](https://www.maptiler.com/terms/cloud/)
