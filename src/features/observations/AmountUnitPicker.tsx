@@ -12,7 +12,7 @@ export function AmountUnitPicker({
   error,
 }: {
   value: ObservationUnit | "";
-  onChange: (unit: ObservationUnit) => void;
+  onChange: (unit: ObservationUnit | "") => void;
   error?: string;
 }) {
   return (
@@ -26,8 +26,8 @@ export function AmountUnitPicker({
               key={unit}
               accessibilityRole="radio"
               accessibilityState={{ checked: selected }}
-              accessibilityLabel={`Enhet ${unit}`}
-              onPress={() => onChange(unit)}
+              accessibilityLabel={selected ? `Avmarkera enhet ${unit}` : `Enhet ${unit}`}
+              onPress={() => onChange(selected ? "" : unit)}
               style={({ pressed }) => [
                 styles.option,
                 selected && styles.selectedOption,
@@ -47,7 +47,9 @@ export function AmountUnitPicker({
           {error}
         </Text>
       ) : (
-        <Text style={styles.hint}>Välj en av de fasta enheterna när antal anges.</Text>
+        <Text style={styles.hint}>
+          Välj en fast enhet när antal anges. Tryck på den valda enheten igen för att rensa.
+        </Text>
       )}
     </View>
   );

@@ -100,7 +100,7 @@ independent of platform views where practical.
   municipalities, with optional free text for a more specific area.
 - Amount is optional. When an amount is entered, a unit is required and must be
   one of `stjälkar/strån/skott`, `plantor/tuvor`, `m2`, `dm2`, or `cm2`.
-  Custom unit text is not supported.
+  Custom unit text is not supported. Tapping the selected unit again clears it.
 - The bundled Dyntaxa taxonomy contains only accepted taxa with raw rank
   `species` or `subspecies` below the accepted `Tracheophyta` root. Non-accepted
   scientific names and alternative Swedish names are searchable aliases, not
@@ -287,7 +287,8 @@ Fields, in order:
    the normalized species identity is already present.
 7. Amount, optional non-negative number. If present, unit is required and is
    selected from exactly `stjälkar/strån/skott`, `plantor/tuvor`, `m2`, `dm2`,
-   or `cm2`. The control does not accept custom text.
+   or `cm2`. The control does not accept custom text and toggles the selected
+   unit off when it is pressed again, allowing an accidental choice to be cleared.
 8. Public comment (`Publik kommentar`), optional multiline plain text. Make its
    exported/public character clear in the label.
 9. Additional observers (`Med-observatör`), optional repeatable names. Trim

@@ -4,7 +4,7 @@ import { OBSERVATION_UNITS } from "@/domain/amount";
 import { AmountUnitPicker } from "../AmountUnitPicker";
 
 describe("AmountUnitPicker", () => {
-  it("renders only the approved units and selects one", () => {
+  it("renders only the approved units and toggles the selected unit", () => {
     const onChange = jest.fn();
     const screen = render(
       <AmountUnitPicker value="" onChange={onChange} />,
@@ -17,5 +17,9 @@ describe("AmountUnitPicker", () => {
 
     fireEvent.press(screen.getByLabelText("Enhet plantor/tuvor"));
     expect(onChange).toHaveBeenCalledWith("plantor/tuvor");
+
+    screen.rerender(<AmountUnitPicker value="plantor/tuvor" onChange={onChange} />);
+    fireEvent.press(screen.getByLabelText("Avmarkera enhet plantor/tuvor"));
+    expect(onChange).toHaveBeenLastCalledWith("");
   });
 });
