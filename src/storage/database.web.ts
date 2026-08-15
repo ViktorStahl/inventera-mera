@@ -602,6 +602,13 @@ export async function searchTaxa(
     .slice(0, limit);
 }
 
+export async function prepareTaxonomySearch(
+  taxonomyPackageId = VASCULAR_PLANTS_TAXONOMY.packageId,
+): Promise<void> {
+  if (!findTaxonomy(taxonomyPackageId)) return;
+  await getDatabase();
+}
+
 export async function saveDraft<T>(key: string, value: T): Promise<void> {
   const state = await getDatabase();
   state.drafts[key] = value;

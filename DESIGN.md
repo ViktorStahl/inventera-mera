@@ -43,7 +43,9 @@ matching while retaining separate, explicit persistence operations. Form draft
 autosaving likewise uses one lifecycle hook for its debounce and inactive-state
 flush. The survey map has one fixed, non-scrolling viewport contract on both
 platforms; its WGS84 marker geometry and offline coordinate plot are shared, and
-native as well as browser markers are selectable.
+native as well as browser markers are selectable. Native taxonomy search is
+prepared in the background after application storage is ready so the first
+species query does not pay the asset-import/open cost.
 
 ## 1. Product summary
 
@@ -351,6 +353,11 @@ observation.
   list entries participate; taxonomy identities are de-duplicated.
 - Results show preferred name, scientific name, and a clear synonym/status
   indication when applicable.
+- Search input uses a 100 ms debounce. If a database query is already running,
+  newer input replaces any queued intermediate prefix; after the active query
+  completes, only the latest query runs. Results from an older query are never
+  displayed for newer input, and a visible progress state replaces stale
+  suggestions while the current query is pending.
 - Limit the first result set (for example, 30 rows) and virtualize longer lists.
 - Keyboard, switch-control, and screen-reader selection must work as well as
   touch selection.

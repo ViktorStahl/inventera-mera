@@ -122,6 +122,13 @@ async function getTaxonomyDatabase(): Promise<SQLite.SQLiteDatabase> {
   return taxonomyDatabasePromise;
 }
 
+export async function prepareTaxonomySearch(
+  taxonomyPackageId = VASCULAR_PLANTS_TAXONOMY.packageId,
+): Promise<void> {
+  if (!findTaxonomy(taxonomyPackageId)) return;
+  await getTaxonomyDatabase();
+}
+
 async function openTaxonomyDatabase(): Promise<SQLite.SQLiteDatabase> {
   await SQLite.importDatabaseFromAssetAsync(TAXONOMY_DATABASE_NAME, {
     assetId: TAXONOMY_DATABASE_ASSET,

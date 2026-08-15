@@ -4,7 +4,8 @@ import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 
 import type { SpeciesList, Taxon } from "@/domain/models";
 import { taxonomySpeciesSnapshot } from "@/domain/species";
-import { addSpeciesToList, getSpeciesList, searchTaxa } from "@/storage/database";
+import { useSpeciesSuggestions } from "@/features/taxonomy/useSpeciesSuggestions";
+import { addSpeciesToList, getSpeciesList } from "@/storage/database";
 import { Button } from "@/ui/Button";
 import { messageOf } from "@/ui/errors";
 import { Card } from "@/ui/Card";
@@ -16,7 +17,7 @@ export default function AddSpeciesToListScreen() {
   const { listId } = useLocalSearchParams<{ listId: string }>();
   const [list, setList] = useState<SpeciesList>();
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Taxon[]>([]);
+  const [addedTaxonIds, setAddedTaxonIds] = useState<string[]>([]);
   const [adding, setAdding] = useState<string>();
 
   useEffect(() => {
@@ -27,25 +28,23 @@ export default function AddSpeciesToListScreen() {
     }).catch((error) => Alert.alert("Artlistan kunde inte öppnas", messageOf(error)));
   }, [listId]);
 
-  useEffect(() => {
-    if (!listId || !query.trim()) return;
-    let active = true;
-    const timeout = setTimeout(() => {
-      searchTaxa(query, 50, listId, list?.taxonomyRef.packageId)
-        .then((taxa) => { if (active) setResults(taxa); })
-        .catch(() => { if (active) setResults([]); });
-    }, 100);
-    return () => { active = false; clearTimeout(timeout); };
-  }, [list?.taxonomyRef.packageId, listId, query]);
-
-  const visibleResults = query.trim() ? results : [];
+  const { results, loading } = useSpeciesSuggestions({
+    query,
+    limit: 50,
+    speciesListId: listId,
+    taxonomyPackageId: list?.taxonomyRef.packageId,
+    enabled: Boolean(listId && list),
+  });
+  const visibleResults = results.map((taxon) =>
+    addedTaxonIds.includes(taxon.id) ? { ...taxon, inSpeciesList: true } : taxon,
+  );
 
   async function addTaxon(taxon: Taxon) {
     if (!listId || !list || taxon.inSpeciesList) return;
     setAdding(taxon.id);
     try {
       await addSpeciesToList(listId, taxonomySpeciesSnapshot(taxon, list.taxonomyRef));
-      setResults((current) => current.map((item) => item.id === taxon.id ? { ...item, inSpeciesList: true } : item));
+      setAddedTaxonIds((current) => current.includes(taxon.id) ? current : [...current, taxon.id]);
     } catch (error) {
       Alert.alert("Arten kunde inte läggas till", messageOf(error));
     } finally {
@@ -74,8 +73,14 @@ export default function AddSpeciesToListScreen() {
       <Text style={styles.heading}>{list.name}</Text>
       <Text style={styles.meta}>Sök i {list.taxonomyRef.name}. Arter som redan finns i listan markeras.</Text>
       <Field label="Sök arter" value={query} onChangeText={setQuery} placeholder="Svenskt eller vetenskapligt namn" autoCorrect={false} autoFocus />
+      {loading ? (
+        <View style={styles.loading} accessibilityLiveRegion="polite">
+          <ActivityIndicator color={colors.green700} />
+          <Text style={styles.meta}>Söker arter…</Text>
+        </View>
+      ) : null}
       <View style={styles.results}>
-        {visibleResults.map((taxon) => (
+        {!loading ? visibleResults.map((taxon) => (
           <Card key={taxon.id}>
             <View style={styles.row}>
               <View style={styles.body}>
@@ -85,7 +90,7 @@ export default function AddSpeciesToListScreen() {
               {taxon.inSpeciesList ? <Text style={styles.inList}>✓ I listan</Text> : <Button label="Lägg till" variant="ghost" loading={adding === taxon.id} onPress={() => void addTaxon(taxon)} />}
             </View>
           </Card>
-        ))}
+        )) : null}
       </View>
       {query.trim() ? <Button label={`Lägg till ”${query.trim()}” som fritext`} variant="secondary" loading={adding === "free-text"} onPress={() => void addFreeText()} /> : null}
     </Screen>
@@ -97,6 +102,7 @@ const styles = StyleSheet.create({
   heading: { color: colors.text, fontSize: 20, fontWeight: "700" },
   meta: { color: colors.textMuted },
   results: { gap: spacing.sm },
+  loading: { minHeight: 64, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm },
   row: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   body: { flex: 1 },
   species: { color: colors.text, fontWeight: "700" },

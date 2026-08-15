@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { colors } from "@/ui/theme";
-import { getDatabase } from "./database";
+import { getDatabase, prepareTaxonomySearch } from "./database";
 
 type DatabaseState = { ready: true };
 
@@ -16,7 +16,10 @@ export function DatabaseProvider({ children }: { children: React.ReactNode }) {
     let active = true;
     getDatabase()
       .then(() => {
-        if (active) setReady(true);
+        if (active) {
+          setReady(true);
+          void prepareTaxonomySearch().catch(() => undefined);
+        }
       })
       .catch((reason: unknown) => {
         if (active) {

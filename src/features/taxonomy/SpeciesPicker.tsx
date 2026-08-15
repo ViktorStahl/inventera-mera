@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { findTaxonomy } from "@/data/taxonomies";
 import type { Taxon } from "@/domain/models";
-import { searchTaxa } from "@/storage/database";
 import { Field } from "@/ui/Field";
 import { colors, spacing } from "@/ui/theme";
+import { useSpeciesSuggestions } from "./useSpeciesSuggestions";
 
 export function SpeciesPicker({
   query,
@@ -26,25 +25,14 @@ export function SpeciesPicker({
   speciesListName?: string;
   error?: string;
 }) {
-  const [results, setResults] = useState<Taxon[]>([]);
   const taxonomy = findTaxonomy(taxonomyPackageId);
-
-  useEffect(() => {
-    let active = true;
-    const timeout = setTimeout(() => {
-      searchTaxa(query, 20, speciesListId, taxonomyPackageId)
-        .then((taxa) => {
-          if (active) setResults(taxa);
-        })
-        .catch(() => {
-          if (active) setResults([]);
-        });
-    }, 100);
-    return () => {
-      active = false;
-      clearTimeout(timeout);
-    };
-  }, [query, speciesListId, taxonomyPackageId]);
+  const { results, loading } = useSpeciesSuggestions({
+    query,
+    limit: 20,
+    speciesListId,
+    taxonomyPackageId,
+    enabled: !selectedTaxon,
+  });
 
   const listResults = results.filter((taxon) => taxon.inSpeciesList);
   const taxonomyResults = results.filter((taxon) => !taxon.inSpeciesList);
@@ -78,7 +66,13 @@ export function SpeciesPicker({
       ) : null}
       {query.trim() && !selectedTaxon ? (
         <View style={styles.results}>
-          {listResults.length ? (
+          {loading ? (
+            <View style={styles.loading} accessibilityLiveRegion="polite">
+              <ActivityIndicator color={colors.green700} />
+              <Text style={styles.loadingText}>Söker arter…</Text>
+            </View>
+          ) : null}
+          {!loading && listResults.length ? (
             <ResultGroup
               title={`Från artlistan ${speciesListName ?? ""}`.trim()}
               taxa={listResults}
@@ -88,7 +82,7 @@ export function SpeciesPicker({
               }}
             />
           ) : null}
-          {taxonomyResults.length ? (
+          {!loading && taxonomyResults.length ? (
             <ResultGroup
               title={speciesListId ? "Övriga i taxonomin" : "Från taxonomin"}
               taxa={taxonomyResults}
@@ -156,6 +150,14 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: colors.surface,
   },
+  loading: {
+    minHeight: 72,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+  },
+  loadingText: { color: colors.textMuted },
   result: { padding: spacing.md, borderBottomWidth: 1, borderColor: colors.border },
   groupTitle: {
     paddingHorizontal: spacing.md,
