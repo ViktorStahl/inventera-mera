@@ -37,6 +37,14 @@ managed offline map-package downloads, observation duplication, and reversible
 survey archiving remain post-MVP items described below, not claims about the
 current app.
 
+Native SQLite and browser localStorage repositories share deterministic policy
+for draft identities, backup normalization, locale inheritance, and species-list
+matching while retaining separate, explicit persistence operations. Form draft
+autosaving likewise uses one lifecycle hook for its debounce and inactive-state
+flush. The survey map has one fixed, non-scrolling viewport contract on both
+platforms; its WGS84 marker geometry and offline coordinate plot are shared, and
+native as well as browser markers are selectable.
+
 ## 1. Product summary
 
 Inventera mera is a React Native mobile application, built with Expo and
@@ -773,6 +781,10 @@ for the connected basemap:
   localStorage, sessionStorage, IndexedDB, backups, logs, URLs, or exported data.
 - Validate credentials against GetCapabilities before accepting them. Scope the
   Authorization header strictly to the Lantmäteriet WMTS endpoint.
+- Once accepted, opening the map reads the stored/session credentials directly
+  and lets the actual map request determine current service availability. It
+  does not issue a second GetCapabilities request on every map opening; renderer
+  failure immediately falls back to the offline coordinate plot.
 - The product is documented to end on 2026-12-31 and its overview resolution is
   not a durable detailed-field-map solution. Keep all provider details behind
   the adapter so this source can be removed without changing observation data.

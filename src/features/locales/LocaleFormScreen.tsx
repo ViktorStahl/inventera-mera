@@ -1,7 +1,7 @@
 import * as Location from "expo-location";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, AppState, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 
 import { rt90ToWgs84, wgs84ToRt90 } from "@/domain/coordinates";
 import type { LocaleDraft, SurveyLocale } from "@/domain/models";
@@ -23,11 +23,12 @@ import {
   loadDraft,
   localeDraftKey,
   localeEditDraftKey,
-  saveDraft,
   updateLocale,
 } from "@/storage/database";
+import { useDraftAutosave } from "@/storage/useDraftAutosave";
 import { Button } from "@/ui/Button";
 import { confirmDestructive } from "@/ui/confirm";
+import { messageOf } from "@/ui/errors";
 import { Field } from "@/ui/Field";
 import { Screen } from "@/ui/Screen";
 import { colors, spacing } from "@/ui/theme";
@@ -55,6 +56,11 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [locating, setLocating] = useState(false);
+  const draftKey = surveyId && (!editing || localeId)
+    ? editing
+      ? localeEditDraftKey(surveyId, localeId!)
+      : localeDraftKey(surveyId)
+    : undefined;
 
   useEffect(() => {
     if (!surveyId || (editing && !localeId)) return;
@@ -76,25 +82,7 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
       .finally(() => setHydrated(true));
   }, [editing, localeId, surveyId]);
 
-  useEffect(() => {
-    if (!hydrated || !surveyId || !draft || (editing && !localeId)) return;
-    const key = editing
-      ? localeEditDraftKey(surveyId, localeId!)
-      : localeDraftKey(surveyId);
-    const timeout = setTimeout(() => void saveDraft(key, draft), 300);
-    return () => clearTimeout(timeout);
-  }, [draft, editing, hydrated, localeId, surveyId]);
-
-  useEffect(() => {
-    if (!hydrated || !surveyId || !draft || (editing && !localeId)) return;
-    const key = editing
-      ? localeEditDraftKey(surveyId, localeId!)
-      : localeDraftKey(surveyId);
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state !== "active") void saveDraft(key, draft);
-    });
-    return () => subscription.remove();
-  }, [draft, editing, hydrated, localeId, surveyId]);
+  useDraftAutosave(draftKey, draft, hydrated);
 
   function update<K extends keyof LocaleDraft>(key: K, value: LocaleDraft[K]) {
     setDraft((current) => (current ? { ...current, [key]: value } : current));
@@ -349,10 +337,6 @@ function localeToDraft(locale: SurveyLocale): LocaleDraft {
     longitude: locale.position.wgs84.longitude,
     note: locale.note ?? "",
   };
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : "Ett oväntat fel uppstod.";
 }
 
 const styles = StyleSheet.create({

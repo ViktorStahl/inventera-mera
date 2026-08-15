@@ -18,6 +18,7 @@ import { ObservationMap } from "@/features/map/ObservationMap";
 import { dismissToSurvey } from "@/navigation/hierarchy";
 import { getSurvey, listLocales, listObservations } from "@/storage/database";
 import { Button } from "@/ui/Button";
+import { messageOf } from "@/ui/errors";
 import { Card } from "@/ui/Card";
 import { Field } from "@/ui/Field";
 import { Screen } from "@/ui/Screen";
@@ -62,10 +63,6 @@ export default function SurveyMapScreen() {
   );
   const activeFilterCount = selectedLocaleIds.length + selectedSpeciesKeys.length + (date.trim() ? 1 : 0);
 
-  function toggle(items: string[], value: string, setItems: (items: string[]) => void) {
-    setItems(items.includes(value) ? items.filter((item) => item !== value) : [...items, value]);
-  }
-
   function clearFilters() {
     setSelectedLocaleIds([]);
     setSelectedSpeciesKeys([]);
@@ -98,11 +95,7 @@ export default function SurveyMapScreen() {
         />
         {activeFilterCount ? <Button label="Rensa" variant="ghost" onPress={clearFilters} /> : null}
       </View>
-      <ObservationMap
-        observations={filtered}
-        fillAvailableSpace
-        showObservationList={false}
-      />
+      <ObservationMap observations={filtered} />
       <Card>
         <Text style={styles.summaryTitle}>Visar {filtered.length} av {observations.length} observationer</Text>
         <Text style={styles.summaryText}>{new Set(filtered.map((observation) => observation.localeId)).size} lokaler · {new Set(filtered.map((observation) => observation.species.enteredName.toLocaleLowerCase("sv"))).size} arter</Text>
@@ -132,7 +125,7 @@ export default function SurveyMapScreen() {
                     key={locale.id}
                     accessibilityRole="checkbox"
                     accessibilityState={{ checked: selected }}
-                    onPress={() => toggle(selectedLocaleIds, locale.id, setSelectedLocaleIds)}
+                    onPress={() => setSelectedLocaleIds((current) => toggleSelection(current, locale.id))}
                     style={[styles.chip, selected && styles.selectedChip]}
                   >
                     <Text style={[styles.chipText, selected && styles.selectedChipText]}>{locale.name}</Text>
@@ -149,7 +142,7 @@ export default function SurveyMapScreen() {
                     key={species.key}
                     accessibilityRole="checkbox"
                     accessibilityState={{ checked: selected }}
-                    onPress={() => toggle(selectedSpeciesKeys, species.key, setSelectedSpeciesKeys)}
+                    onPress={() => setSelectedSpeciesKeys((current) => toggleSelection(current, species.key))}
                     style={[styles.chip, selected && styles.selectedChip]}
                   >
                     <Text style={[styles.chipText, selected && styles.selectedChipText]}>{species.name} ({species.count})</Text>
@@ -172,8 +165,8 @@ export default function SurveyMapScreen() {
   );
 }
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : "Ett oväntat fel uppstod.";
+function toggleSelection(items: string[], value: string): string[] {
+  return items.includes(value) ? items.filter((item) => item !== value) : [...items, value];
 }
 
 const styles = StyleSheet.create({

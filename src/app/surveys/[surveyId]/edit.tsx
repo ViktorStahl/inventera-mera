@@ -1,21 +1,21 @@
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, View } from "react-native";
 
 import { VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
 import type { SurveyDraft } from "@/domain/models";
 import { hasErrors, validateSurveyDraft, type ValidationErrors } from "@/domain/validation";
-import { TaxonomySpeciesListFields } from "@/features/taxonomy/TaxonomySpeciesListFields";
+import { SurveyFields } from "@/features/surveys/SurveyFields";
 import { dismissToSurvey } from "@/navigation/hierarchy";
 import {
   getSurvey,
   loadDraft,
-  saveDraft,
   surveyEditDraftKey,
   updateSurvey,
 } from "@/storage/database";
+import { useDraftAutosave } from "@/storage/useDraftAutosave";
 import { Button } from "@/ui/Button";
-import { Field } from "@/ui/Field";
+import { messageOf } from "@/ui/errors";
 import { Screen } from "@/ui/Screen";
 import { colors, spacing } from "@/ui/theme";
 
@@ -46,19 +46,9 @@ export default function EditSurveyScreen() {
       .finally(() => setHydrated(true));
   }, [surveyId]);
 
-  useEffect(() => {
-    if (!hydrated || !surveyId || !draft) return;
-    const timeout = setTimeout(
-      () => void saveDraft(surveyEditDraftKey(surveyId), draft),
-      300,
-    );
-    return () => clearTimeout(timeout);
-  }, [draft, hydrated, surveyId]);
+  useDraftAutosave(surveyId ? surveyEditDraftKey(surveyId) : undefined, draft, hydrated);
 
-  const canSave = useMemo(
-    () => Boolean(draft && hydrated && !saving),
-    [draft, hydrated, saving],
-  );
+  const canSave = Boolean(draft && hydrated && !saving);
 
   function update<K extends keyof SurveyDraft>(key: K, value: SurveyDraft[K]) {
     setDraft((current) => (current ? { ...current, [key]: value } : current));
@@ -92,36 +82,7 @@ export default function EditSurveyScreen() {
   return (
     <Screen>
       <Stack.Screen options={{ title: "Redigera inventering" }} />
-      <Field
-        label="Titel"
-        value={draft.title}
-        onChangeText={(value) => update("title", value)}
-        placeholder="Till exempel Ängsmark vid Lillåsen"
-        error={errors.title}
-        autoFocus
-      />
-      <Field
-        label="Beskrivning (valfri)"
-        value={draft.description}
-        onChangeText={(value) => update("description", value)}
-        placeholder="Syfte eller avgränsning"
-        multiline
-      />
-      <Field
-        label="Inventeringsdatum"
-        value={draft.surveyDate}
-        onChangeText={(value) => update("surveyDate", value)}
-        placeholder="ÅÅÅÅ-MM-DD"
-        keyboardType="numbers-and-punctuation"
-        error={errors.surveyDate}
-      />
-      <TaxonomySpeciesListFields
-        taxonomyPackageId={draft.taxonomyPackageId}
-        speciesListId={draft.speciesListId}
-        onTaxonomyChange={(value) => update("taxonomyPackageId", value)}
-        onSpeciesListChange={(value) => update("speciesListId", value)}
-        taxonomyError={errors.taxonomyPackageId}
-      />
+      <SurveyFields draft={draft} errors={errors} onUpdate={update} />
       <View style={styles.actions}>
         <Button
           label="Spara ändringar"
@@ -133,10 +94,6 @@ export default function EditSurveyScreen() {
       </View>
     </Screen>
   );
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : "Ett oväntat fel uppstod.";
 }
 
 const styles = StyleSheet.create({

@@ -7,6 +7,7 @@ import { createSpeciesList, listSpeciesLists } from "@/storage/database";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
 import { Field } from "@/ui/Field";
+import { messageOf } from "@/ui/errors";
 import { colors, spacing } from "@/ui/theme";
 
 export function TaxonomySpeciesListFields({
@@ -120,10 +121,6 @@ export function TaxonomySpeciesListFields({
       />
     </View>
   );
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : "Ett oväntat fel uppstod.";
 }
 
 const styles = StyleSheet.create({

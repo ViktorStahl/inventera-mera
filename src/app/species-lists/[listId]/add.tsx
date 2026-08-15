@@ -6,6 +6,7 @@ import type { SpeciesList, Taxon } from "@/domain/models";
 import { taxonomySpeciesSnapshot } from "@/domain/species";
 import { addSpeciesToList, getSpeciesList, searchTaxa } from "@/storage/database";
 import { Button } from "@/ui/Button";
+import { messageOf } from "@/ui/errors";
 import { Card } from "@/ui/Card";
 import { Field } from "@/ui/Field";
 import { Screen } from "@/ui/Screen";
@@ -90,8 +91,6 @@ export default function AddSpeciesToListScreen() {
     </Screen>
   );
 }
-
-function messageOf(error: unknown): string { return error instanceof Error ? error.message : "Ett oväntat fel uppstod."; }
 
 const styles = StyleSheet.create({
   center: { alignItems: "center", justifyContent: "center" },

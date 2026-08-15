@@ -5,6 +5,7 @@ import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, View } from "reac
 import type { SpeciesListSummary } from "@/domain/models";
 import { listSpeciesLists } from "@/storage/database";
 import { Button } from "@/ui/Button";
+import { messageOf } from "@/ui/errors";
 import { Card } from "@/ui/Card";
 import { EmptyState } from "@/ui/EmptyState";
 import { Field } from "@/ui/Field";
@@ -67,10 +68,6 @@ export default function SpeciesListsScreen() {
       />
     </View>
   );
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : "Ett oväntat fel uppstod.";
 }
 
 const styles = StyleSheet.create({

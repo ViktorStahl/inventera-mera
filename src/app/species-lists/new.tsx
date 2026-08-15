@@ -6,6 +6,7 @@ import { AVAILABLE_TAXONOMIES, findTaxonomy } from "@/data/taxonomies";
 import { dismissToSpeciesList } from "@/navigation/hierarchy";
 import { createSpeciesList, getAppSettings } from "@/storage/database";
 import { Button } from "@/ui/Button";
+import { messageOf } from "@/ui/errors";
 import { Card } from "@/ui/Card";
 import { Field } from "@/ui/Field";
 import { Screen } from "@/ui/Screen";
@@ -53,10 +54,6 @@ export default function NewSpeciesListScreen() {
       </View>
     </Screen>
   );
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : "Ett oväntat fel uppstod.";
 }
 
 const styles = StyleSheet.create({

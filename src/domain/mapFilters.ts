@@ -1,4 +1,5 @@
 import type { Observation } from "./models";
+import { normalizeSpeciesName } from "./species";
 
 export type ObservationMapFilters = {
   localeIds: string[];
@@ -22,7 +23,7 @@ export function speciesFilterKey(observation: Observation): string {
       observation.species.taxonId,
     ].join(":");
   }
-  return `free-text:${normalize(observation.species.enteredName)}`;
+  return `free-text:${normalizeSpeciesName(observation.species.enteredName)}`;
 }
 
 export function listSpeciesFilterOptions(
@@ -58,12 +59,4 @@ export function filterMapObservations(
     if (filters.date && !observation.observedAt.startsWith(`${filters.date}T`)) return false;
     return true;
   });
-}
-
-function normalize(value: string): string {
-  return value
-    .trim()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLocaleLowerCase("sv");
 }

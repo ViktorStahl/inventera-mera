@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
+import { messageOf } from "@/ui/errors";
 import { getLantmaterietCredentials } from "./credentials";
 import {
   lantmaterietAuthorizationHeader,
-  verifyLantmaterietCredentials,
   type LantmaterietCredentials,
 } from "./lantmateriet";
 
@@ -19,16 +19,18 @@ export function useLantmaterietMapAccess(): MapAccess {
   useEffect(() => {
     let active = true;
     getLantmaterietCredentials()
-      .then(async (credentials) => {
+      .then((credentials) => {
         if (!credentials) {
           if (active) setAccess({ status: "missing" });
           return;
         }
-        await verifyLantmaterietCredentials(credentials);
         if (active) setAccess(availableAccess(credentials));
       })
       .catch((error) => {
-        if (active) setAccess({ status: "unavailable", message: messageOf(error) });
+        if (active) setAccess({
+          status: "unavailable",
+          message: messageOf(error, "Kartan kunde inte anslutas."),
+        });
       });
     return () => {
       active = false;
@@ -43,8 +45,4 @@ function availableAccess(credentials: LantmaterietCredentials): MapAccess {
     status: "available",
     authorization: lantmaterietAuthorizationHeader(credentials),
   };
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : "Kartan kunde inte anslutas.";
 }

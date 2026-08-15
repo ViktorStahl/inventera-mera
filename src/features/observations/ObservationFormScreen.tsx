@@ -1,7 +1,7 @@
 import * as Location from "expo-location";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, AppState, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 
 import { VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
 import { rt90ToWgs84, wgs84ToRt90 } from "@/domain/coordinates";
@@ -47,13 +47,14 @@ import {
   loadDraft,
   observationDraftKey,
   observationEditDraftKey,
-  saveDraft,
   speciesListContains,
   updateObservation,
 } from "@/storage/database";
+import { useDraftAutosave } from "@/storage/useDraftAutosave";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
 import { confirmDestructive } from "@/ui/confirm";
+import { messageOf } from "@/ui/errors";
 import { Field } from "@/ui/Field";
 import { Screen } from "@/ui/Screen";
 import { colors, spacing } from "@/ui/theme";
@@ -104,6 +105,11 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
   const [detailsExpanded, setDetailsExpanded] = useState(false);
   const draftSpeciesQuery = draft?.speciesQuery ?? "";
   const draftSelectedTaxon = draft?.selectedTaxon;
+  const draftKey = surveyId && locale && (!editing || observationId)
+    ? editing
+      ? observationEditDraftKey(surveyId, locale.id, observationId!)
+      : observationDraftKey(surveyId, locale.id)
+    : undefined;
 
   const membershipCandidate = useMemo(() => {
     if (!speciesList || !survey || !draftSpeciesQuery.trim()) return undefined;
@@ -162,14 +168,7 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
       .finally(() => setHydrated(true));
   }, [editing, observationId, params.localeId, surveyId]);
 
-  useEffect(() => {
-    if (!hydrated || !surveyId || !locale || !draft || (editing && !observationId)) return;
-    const key = editing
-      ? observationEditDraftKey(surveyId, locale.id, observationId!)
-      : observationDraftKey(surveyId, locale.id);
-    const timeout = setTimeout(() => void saveDraft(key, draft), 300);
-    return () => clearTimeout(timeout);
-  }, [draft, editing, hydrated, locale, observationId, surveyId]);
+  useDraftAutosave(draftKey, draft, hydrated);
 
   useEffect(() => {
     if (!membershipCandidate) return;
@@ -185,17 +184,6 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
       active = false;
     };
   }, [membershipCandidate]);
-
-  useEffect(() => {
-    if (!hydrated || !surveyId || !locale || !draft || (editing && !observationId)) return;
-    const key = editing
-      ? observationEditDraftKey(surveyId, locale.id, observationId!)
-      : observationDraftKey(surveyId, locale.id);
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state !== "active") void saveDraft(key, draft);
-    });
-    return () => subscription.remove();
-  }, [draft, editing, hydrated, locale, observationId, surveyId]);
 
   function update<K extends keyof ObservationDraft>(key: K, value: ObservationDraft[K]) {
     setDraft((current) => (current ? { ...current, [key]: value } : current));
@@ -534,10 +522,6 @@ function taxonFromObservation(observation: Observation): Taxon | undefined {
     taxonomyPackageId: observation.species.taxonomyPackageId,
     taxonomyVersion: observation.species.taxonomyVersion,
   };
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : "Ett oväntat fel uppstod.";
 }
 
 const styles = StyleSheet.create({
