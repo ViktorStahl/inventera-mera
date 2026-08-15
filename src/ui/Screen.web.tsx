@@ -15,7 +15,12 @@ type Props = PropsWithChildren<{
   footer?: ReactNode;
 }>;
 
-export function Screen({ children, scroll = true, contentContainerStyle, footer }: Props) {
+export function Screen({
+  children,
+  scroll = true,
+  contentContainerStyle,
+  footer,
+}: Props) {
   const content = scroll ? (
     <ScrollView
       style={styles.flex}

@@ -28,12 +28,14 @@ is not yet an installable/service-worker-backed PWA. The bundled Dyntaxa package
 contains 10,711 accepted species and subspecies below the vascular-plant root
 from the 2026-06-18 Darwin Core Archive. Native search uses its bundled SQLite
 FTS5 database; the browser preview searches a compact generated JSON equivalent.
-The map
-accepts a MapLibre style URL for the selected Lantmäteriet raster product and
-falls back to an offline coordinate plot until the organisation supplies its
-approved processed tile endpoint and attribution. Custom taxonomy import,
-managed map-package downloads, observation duplication, and reversible survey
-archiving remain post-MVP items described below, not claims about the current app.
+The map uses the coloured `topowebb` layer from Lantmäteriet's authenticated
+overview WMTS as a temporary online basemap. Native users keep their own Basic
+Auth credentials in platform secure storage; browser credentials remain only in
+memory until the page reloads. The app falls back to its offline coordinate plot
+without credentials, reception, or service access. Custom taxonomy import,
+managed offline map-package downloads, observation duplication, and reversible
+survey archiving remain post-MVP items described below, not claims about the
+current app.
 
 ## 1. Product summary
 
@@ -366,6 +368,11 @@ observation.
 - Filters support one or more locales, one or more species, and an optional
   exact date. Selections within a category use OR; categories combine with AND.
   The filtering itself is local and remains available without reception.
+- On touch devices, every gesture that starts inside the interactive map belongs
+  exclusively to the map, regardless of movement direction. The map viewport must
+  not be nested in a vertical `ScrollView`; potentially long map filters open in a
+  separate scrollable modal. This structural separation prevents Android from
+  handing vertical map movement to application scrolling.
 
 ### 5.8 Offline and storage feedback
 
@@ -752,7 +759,29 @@ user confirmation before removing downloaded data.
 MapLibre Native is the rendering layer, not the data licence. Configure sources
 behind an adapter and display the attribution required by the selected source.
 
-### Chosen MVP source
+### Temporary online source
+
+Use Lantmäteriet's `Topografisk webbkarta Visning, översiktlig` WMTS temporarily
+for the connected basemap:
+
+- Use the coloured `topowebb` raster layer, Web Mercator matrix set `3857`, and
+  its documented 256-pixel PNG tiles. Keep observations in canonical WGS84 and
+  let MapLibre project them onto the map.
+- Every user supplies their own Basic Auth username and password. On iOS and
+  Android, save the pair with Expo SecureStore using device-only keychain
+  accessibility. On Web, keep it in module memory only: never write it to
+  localStorage, sessionStorage, IndexedDB, backups, logs, URLs, or exported data.
+- Validate credentials against GetCapabilities before accepting them. Scope the
+  Authorization header strictly to the Lantmäteriet WMTS endpoint.
+- The product is documented to end on 2026-12-31 and its overview resolution is
+  not a durable detailed-field-map solution. Keep all provider details behind
+  the adapter so this source can be removed without changing observation data.
+- Do not prefetch or expose an offline-region download action for this WMTS.
+  Normal online display is allowed; reliable offline maps use the separate
+  downloadable source below. If the WMTS is unavailable, retain the local
+  coordinate plot and all observation workflows.
+
+### Chosen offline source
 
 Use Lantmäteriet's downloadable raster topographic map for the MVP. It is a
 better field-inventory fit than a general street map:
@@ -1021,10 +1050,13 @@ corresponding feature is finalized:
 - [OpenTopography developer resources](https://opentopography.org/developers)
 - [Lantmäteriet: Topografi 10 Nedladdning, vektor](https://www.lantmateriet.se/sv/geodata/vara-produkter/produktlista/topografi-10-nedladdning-vektor/)
 - [Lantmäteriet: downloadable topographic-map alternatives](https://www.lantmateriet.se/sv/geodata/vara-produkter/Produktnyheter/Geografisk-information/avveckling-av-produkten-topografisk-webbkarta-visning-oversiktlig/)
+- [Lantmäteriet: Topografisk webbkarta Visning, översiktlig](https://geotorget.lantmateriet.se/geodataprodukter/topografisk-webbkarta-visning-oversiktlig-api)
+- [Lantmäteriet: Topografisk webbkarta Nedladdning, raster](https://geotorget.lantmateriet.se/geodataprodukter/topografisk-webbkarta-nedladdning-raster-api)
 - [Mapbox: mobile offline maps](https://docs.mapbox.com/help/dive-deeper/mobile-offline/)
 - [MapTiler: mobile and offline map options](https://docs.maptiler.com/guides/maps-apis/maps-platform/how-to-build-mobile-apps-with-maps-using-sdk/)
 - [MapTiler Cloud terms](https://www.maptiler.com/terms/cloud/)
 - [Expo: development builds](https://docs.expo.dev/develop/development-builds/use-development-builds/)
 - [Expo: SQLite](https://docs.expo.dev/versions/latest/sdk/sqlite/)
 - [Expo: Location](https://docs.expo.dev/versions/latest/sdk/location/)
+- [Expo: SecureStore](https://docs.expo.dev/versions/latest/sdk/securestore/)
 - [MapLibre React Native](https://maplibre.org/maplibre-react-native/docs/setup/getting-started/)

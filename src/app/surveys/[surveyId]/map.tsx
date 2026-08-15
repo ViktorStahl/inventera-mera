@@ -1,6 +1,16 @@
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { filterMapObservations, listSpeciesFilterOptions } from "@/domain/mapFilters";
 import type { LocaleListItem, Observation, Survey } from "@/domain/models";
@@ -72,7 +82,7 @@ export default function SurveyMapScreen() {
   if (!survey) return null;
 
   return (
-    <Screen>
+    <Screen scroll={false} contentContainerStyle={styles.screen}>
       <Stack.Screen options={{ title: "Karta" }} />
       <View style={styles.tabs} accessibilityRole="tablist">
         <Button label={`Lokaler (${locales.length})`} variant="ghost" onPress={() => dismissToSurvey(router, surveyId)} />
@@ -84,61 +94,80 @@ export default function SurveyMapScreen() {
         <Button
           label={`Filter${activeFilterCount ? ` (${activeFilterCount})` : ""}`}
           variant="secondary"
-          onPress={() => setFiltersOpen((value) => !value)}
+          onPress={() => setFiltersOpen(true)}
         />
         {activeFilterCount ? <Button label="Rensa" variant="ghost" onPress={clearFilters} /> : null}
       </View>
-      {filtersOpen ? (
-        <Card>
-          <Text style={styles.filterTitle}>Lokaler</Text>
-          <View style={styles.chips}>
-            {locales.map((locale) => {
-              const selected = selectedLocaleIds.includes(locale.id);
-              return (
-                <Pressable
-                  key={locale.id}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: selected }}
-                  onPress={() => toggle(selectedLocaleIds, locale.id, setSelectedLocaleIds)}
-                  style={[styles.chip, selected && styles.selectedChip]}
-                >
-                  <Text style={[styles.chipText, selected && styles.selectedChipText]}>{locale.name}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Text style={styles.filterTitle}>Arter</Text>
-          <View style={styles.chips}>
-            {speciesOptions.length ? speciesOptions.map((species) => {
-              const selected = selectedSpeciesKeys.includes(species.key);
-              return (
-                <Pressable
-                  key={species.key}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: selected }}
-                  onPress={() => toggle(selectedSpeciesKeys, species.key, setSelectedSpeciesKeys)}
-                  style={[styles.chip, selected && styles.selectedChip]}
-                >
-                  <Text style={[styles.chipText, selected && styles.selectedChipText]}>{species.name} ({species.count})</Text>
-                </Pressable>
-              );
-            }) : <Text style={styles.emptyFilter}>Inga arter att filtrera.</Text>}
-          </View>
-          <Field
-            label="Datum (valfritt)"
-            value={date}
-            onChangeText={setDate}
-            placeholder="ÅÅÅÅ-MM-DD"
-            keyboardType="numbers-and-punctuation"
-          />
-          <Text style={styles.filterHint}>Val inom samma grupp kombineras med eller. Lokal, art och datum kombineras med och.</Text>
-        </Card>
-      ) : null}
-      <ObservationMap observations={filtered} />
+      <ObservationMap
+        observations={filtered}
+        fillAvailableSpace
+        showObservationList={false}
+      />
       <Card>
         <Text style={styles.summaryTitle}>Visar {filtered.length} av {observations.length} observationer</Text>
         <Text style={styles.summaryText}>{new Set(filtered.map((observation) => observation.localeId)).size} lokaler · {new Set(filtered.map((observation) => observation.species.enteredName.toLocaleLowerCase("sv"))).size} arter</Text>
       </Card>
+      <Modal
+        visible={filtersOpen}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setFiltersOpen(false)}
+      >
+        <SafeAreaView style={styles.filterModal}>
+          <View style={styles.filterModalHeader}>
+            <Text style={styles.filterModalTitle}>Filtrera karta</Text>
+            <Button label="Klar" variant="ghost" onPress={() => setFiltersOpen(false)} />
+          </View>
+          <ScrollView
+            style={styles.filterModalScroll}
+            contentContainerStyle={styles.filterModalContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Text style={styles.filterTitle}>Lokaler</Text>
+            <View style={styles.chips}>
+              {locales.map((locale) => {
+                const selected = selectedLocaleIds.includes(locale.id);
+                return (
+                  <Pressable
+                    key={locale.id}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: selected }}
+                    onPress={() => toggle(selectedLocaleIds, locale.id, setSelectedLocaleIds)}
+                    style={[styles.chip, selected && styles.selectedChip]}
+                  >
+                    <Text style={[styles.chipText, selected && styles.selectedChipText]}>{locale.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.filterTitle}>Arter</Text>
+            <View style={styles.chips}>
+              {speciesOptions.length ? speciesOptions.map((species) => {
+                const selected = selectedSpeciesKeys.includes(species.key);
+                return (
+                  <Pressable
+                    key={species.key}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: selected }}
+                    onPress={() => toggle(selectedSpeciesKeys, species.key, setSelectedSpeciesKeys)}
+                    style={[styles.chip, selected && styles.selectedChip]}
+                  >
+                    <Text style={[styles.chipText, selected && styles.selectedChipText]}>{species.name} ({species.count})</Text>
+                  </Pressable>
+                );
+              }) : <Text style={styles.emptyFilter}>Inga arter att filtrera.</Text>}
+            </View>
+            <Field
+              label="Datum (valfritt)"
+              value={date}
+              onChangeText={setDate}
+              placeholder="ÅÅÅÅ-MM-DD"
+              keyboardType="numbers-and-punctuation"
+            />
+            <Text style={styles.filterHint}>Val inom samma grupp kombineras med eller. Lokal, art och datum kombineras med och.</Text>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </Screen>
   );
 }
@@ -149,10 +178,25 @@ function messageOf(error: unknown): string {
 
 const styles = StyleSheet.create({
   center: { alignItems: "center", justifyContent: "center" },
+  screen: { padding: spacing.lg, gap: spacing.md },
   tabs: { flexDirection: "row", alignItems: "center", borderBottomWidth: 1, borderColor: colors.border },
   activeTab: { flex: 1, minHeight: 48, alignItems: "center", justifyContent: "center", borderBottomWidth: 3, borderColor: colors.green700 },
   activeTabText: { color: colors.green800, fontWeight: "700" },
   filterHeader: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  filterModal: { flex: 1, backgroundColor: colors.background },
+  filterModalHeader: {
+    minHeight: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  filterModalTitle: { color: colors.text, fontSize: 18, fontWeight: "700" },
+  filterModalScroll: { flex: 1 },
+  filterModalContent: { padding: spacing.lg, paddingBottom: 96 },
   filterTitle: { color: colors.text, fontWeight: "700", marginBottom: spacing.sm },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginBottom: spacing.lg },
   chip: { minHeight: 44, justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderRadius: 22, paddingHorizontal: spacing.md, backgroundColor: colors.surface },

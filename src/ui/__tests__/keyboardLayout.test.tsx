@@ -37,4 +37,14 @@ describe("mobile keyboard layout", () => {
     expect(view.getByTestId("keyboard-sticky-footer")).toBeTruthy();
     expect(view.getByText("Spara observation")).toBeTruthy();
   });
+
+  it("can render an interactive viewport without any parent scroller", () => {
+    const view = render(
+      <Screen scroll={false}>
+        <Text>Karta</Text>
+      </Screen>,
+    );
+
+    expect(view.UNSAFE_queryAllByType(ScrollView)).toHaveLength(0);
+  });
 });

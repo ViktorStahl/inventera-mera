@@ -1,6 +1,13 @@
-import { Camera, GeoJSONSource, Layer, Map as NativeMap } from "@maplibre/maplibre-react-native";
-import { useMemo, useState } from "react";
 import {
+  Camera,
+  GeoJSONSource,
+  Layer,
+  Map as NativeMap,
+  TransformRequestManager,
+} from "@maplibre/maplibre-react-native";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
   Pressable,
   StyleSheet,
   Text,
@@ -12,31 +19,54 @@ import type { Observation } from "@/domain/models";
 import { localTimeFromIso } from "@/domain/time";
 import { Card } from "@/ui/Card";
 import { colors, spacing } from "@/ui/theme";
+import {
+  LANTMATERIET_MAP_STYLE,
+  LANTMATERIET_REQUEST_MATCH,
+} from "./lantmateriet";
+import { useLantmaterietMapAccess } from "./useLantmaterietMapAccess";
 
-const mapStyleUrl = process.env.EXPO_PUBLIC_MAP_STYLE_URL?.trim();
+type Props = {
+  observations: Observation[];
+  fillAvailableSpace?: boolean;
+  showObservationList?: boolean;
+};
 
-export function ObservationMap({ observations }: { observations: Observation[] }) {
+export function ObservationMap({
+  observations,
+  fillAvailableSpace = false,
+  showObservationList = true,
+}: Props) {
   const [selectedId, setSelectedId] = useState<string>();
+  const [mapFailure, setMapFailure] = useState<string>();
+  const mapAccess = useLantmaterietMapAccess();
   const selected = observations.find((item) => item.id === selectedId);
+  const showNativeMap = mapAccess.status === "available" && !mapFailure;
 
   return (
-    <View style={styles.wrapper}>
-      {mapStyleUrl ? (
-        <NativeObservationMap observations={observations} />
+    <View style={[styles.wrapper, fillAvailableSpace && styles.wrapperFill]}>
+      {showNativeMap ? (
+        <NativeObservationMap
+          observations={observations}
+          authorization={mapAccess.authorization}
+          fillAvailableSpace={fillAvailableSpace}
+          onFailure={() => setMapFailure("Lantmäteriets karta kunde inte läsas in.")}
+        />
       ) : (
-        <SchematicMap observations={observations} onSelect={setSelectedId} selectedId={selectedId} />
+        <SchematicMap
+          observations={observations}
+          onSelect={setSelectedId}
+          selectedId={selectedId}
+          fillAvailableSpace={fillAvailableSpace}
+        />
       )}
-      {!mapStyleUrl ? (
+      {!showNativeMap ? (
         <View style={styles.notice} accessibilityRole="alert">
-          <Text style={styles.noticeTitle}>Lantmäteriets kartpaket är inte anslutet ännu</Text>
-          <Text style={styles.noticeText}>
-            Observationerna visas offline på ett koordinatnät. Ange den godkända kartstilens URL i
-            EXPO_PUBLIC_MAP_STYLE_URL för rasterkartan.
-          </Text>
+          <Text style={styles.noticeTitle}>{mapNotice(mapAccess.status)}</Text>
+          <Text style={styles.noticeText}>{mapFailure ?? mapNoticeDetails(mapAccess)}</Text>
         </View>
       ) : null}
       {selected ? <ObservationSummary observation={selected} /> : null}
-      <View style={styles.markerList}>
+      {showObservationList ? <View style={styles.markerList}>
         {observations.map((observation) => (
           <Card
             key={observation.id}
@@ -50,12 +80,39 @@ export function ObservationMap({ observations }: { observations: Observation[] }
             </Text>
           </Card>
         ))}
-      </View>
+      </View> : null}
     </View>
   );
 }
 
-function NativeObservationMap({ observations }: { observations: Observation[] }) {
+function NativeObservationMap({
+  observations,
+  authorization,
+  fillAvailableSpace,
+  onFailure,
+}: {
+  observations: Observation[];
+  authorization: string;
+  fillAvailableSpace: boolean;
+  onFailure: () => void;
+}) {
+  const [requestsReady, setRequestsReady] = useState(false);
+  useEffect(() => {
+    let active = true;
+    TransformRequestManager.addHeader({
+      id: "lantmateriet-basic-auth",
+      match: LANTMATERIET_REQUEST_MATCH,
+      name: "Authorization",
+      value: authorization,
+    });
+    queueMicrotask(() => {
+      if (active) setRequestsReady(true);
+    });
+    return () => {
+      active = false;
+      TransformRequestManager.removeHeader("lantmateriet-basic-auth");
+    };
+  }, [authorization]);
   const points = useMemo<GeoJSON.FeatureCollection<GeoJSON.Point>>(
     () => ({
       type: "FeatureCollection",
@@ -72,9 +129,22 @@ function NativeObservationMap({ observations }: { observations: Observation[] })
     [observations],
   );
   const bounds = getBounds(observations);
+  if (!requestsReady) {
+    return (
+      <View style={[styles.mapFrame, fillAvailableSpace && styles.mapFrameFill, styles.loadingMap]}>
+        <ActivityIndicator color={colors.green700} size="large" />
+      </View>
+    );
+  }
   return (
-    <View style={styles.mapFrame}>
-      <NativeMap mapStyle={mapStyleUrl!} style={styles.nativeMap} attribution logo={false}>
+    <View style={[styles.mapFrame, fillAvailableSpace && styles.mapFrameFill]}>
+      <NativeMap
+        mapStyle={LANTMATERIET_MAP_STYLE}
+        style={styles.nativeMap}
+        attribution
+        logo={false}
+        onDidFailLoadingMap={onFailure}
+      >
         <Camera
           initialViewState={
             bounds
@@ -100,14 +170,31 @@ function NativeObservationMap({ observations }: { observations: Observation[] })
   );
 }
 
+function mapNotice(status: ReturnType<typeof useLantmaterietMapAccess>["status"]): string {
+  if (status === "loading") return "Kontrollerar kartanslutningen";
+  if (status === "missing") return "Lantmäteriets karta är inte ansluten";
+  return "Lantmäteriets karta är inte tillgänglig";
+}
+
+function mapNoticeDetails(access: ReturnType<typeof useLantmaterietMapAccess>): string {
+  if (access.status === "loading") return "Observationerna visas på koordinatnätet under tiden.";
+  if (access.status === "missing") {
+    return "Lägg till dina kartuppgifter under Inställningar. Koordinatnätet fungerar offline.";
+  }
+  if (access.status === "unavailable") return `${access.message} Koordinatnätet visas i stället.`;
+  return "Koordinatnätet visas i stället.";
+}
+
 function SchematicMap({
   observations,
   selectedId,
   onSelect,
+  fillAvailableSpace,
 }: {
   observations: Observation[];
   selectedId?: string;
   onSelect: (id: string) => void;
+  fillAvailableSpace: boolean;
 }) {
   const [size, setSize] = useState({ width: 1, height: 1 });
   const bounds = getCoordinateBounds(observations);
@@ -116,7 +203,7 @@ function SchematicMap({
     setSize({ width, height });
   }
   return (
-    <View style={styles.mapFrame} onLayout={handleLayout}>
+    <View style={[styles.mapFrame, fillAvailableSpace && styles.mapFrameFill]} onLayout={handleLayout}>
       <View style={styles.gridHorizontalOne} />
       <View style={styles.gridHorizontalTwo} />
       <View style={styles.gridVerticalOne} />
@@ -219,6 +306,7 @@ function projectPoint(
 
 const styles = StyleSheet.create({
   wrapper: { gap: spacing.md },
+  wrapperFill: { flex: 1, minHeight: 0 },
   mapFrame: {
     height: 420,
     borderRadius: 14,
@@ -229,6 +317,8 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   nativeMap: { flex: 1 },
+  mapFrameFill: { flex: 1, height: undefined, minHeight: 220 },
+  loadingMap: { alignItems: "center", justifyContent: "center" },
   gridHorizontalOne: { position: "absolute", left: 0, right: 0, top: "33%", height: 1, backgroundColor: "#D8DECF" },
   gridHorizontalTwo: { position: "absolute", left: 0, right: 0, top: "66%", height: 1, backgroundColor: "#D8DECF" },
   gridVerticalOne: { position: "absolute", top: 0, bottom: 0, left: "33%", width: 1, backgroundColor: "#D8DECF" },

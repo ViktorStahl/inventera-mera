@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { AttributionControl, type ErrorEvent, Map as MapLibreMap } from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Pressable,
   StyleSheet,
@@ -11,23 +13,56 @@ import type { Observation } from "@/domain/models";
 import { localTimeFromIso } from "@/domain/time";
 import { Card } from "@/ui/Card";
 import { colors, spacing } from "@/ui/theme";
+import {
+  LANTMATERIET_HOST,
+  LANTMATERIET_MAP_STYLE,
+} from "./lantmateriet";
+import { useLantmaterietMapAccess } from "./useLantmaterietMapAccess";
 
-export function ObservationMap({ observations }: { observations: Observation[] }) {
+type Props = {
+  observations: Observation[];
+  fillAvailableSpace?: boolean;
+  showObservationList?: boolean;
+};
+
+export function ObservationMap({
+  observations,
+  fillAvailableSpace = false,
+  showObservationList = true,
+}: Props) {
   const [selectedId, setSelectedId] = useState<string>();
+  const [mapFailure, setMapFailure] = useState<string>();
+  const mapAccess = useLantmaterietMapAccess();
   const selected = observations.find((item) => item.id === selectedId);
+  const handleMapFailure = useCallback((message: string) => setMapFailure(message), []);
+  const showWebMap = mapAccess.status === "available" && !mapFailure;
 
   return (
-    <View style={styles.wrapper}>
-      <CoordinatePlot observations={observations} selectedId={selectedId} onSelect={setSelectedId} />
-      <View style={styles.notice} accessibilityRole="alert">
-        <Text style={styles.noticeTitle}>Webbförhandsvisning</Text>
-        <Text style={styles.noticeText}>
-          Observationerna visas lokalt i ett koordinatnät. Lantmäteriets rasterkarta används i
-          den native appen när en godkänd kartstil har konfigurerats.
-        </Text>
-      </View>
+    <View style={[styles.wrapper, fillAvailableSpace && styles.wrapperFill]}>
+      {showWebMap ? (
+        <WebObservationMap
+          observations={observations}
+          authorization={mapAccess.authorization}
+          fillAvailableSpace={fillAvailableSpace}
+          onSelect={setSelectedId}
+          onFailure={handleMapFailure}
+        />
+      ) : (
+        <CoordinatePlot
+          observations={observations}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          fillAvailableSpace={fillAvailableSpace}
+        />
+      )}
+      {!showWebMap ? (
+        <View style={styles.notice} accessibilityRole="alert">
+          <Text style={styles.noticeTitle}>{mapNotice(mapAccess.status)}</Text>
+          <Text style={styles.noticeText}>{mapFailure ?? mapNoticeDetails(mapAccess)}</Text>
+        </View>
+      ) : null}
       {selected ? <ObservationSummary observation={selected} /> : null}
-      <View style={styles.markerList}>
+      {showObservationList ? <View style={styles.markerList}>
         {observations.map((observation) => (
           <Card
             key={observation.id}
@@ -43,19 +78,156 @@ export function ObservationMap({ observations }: { observations: Observation[] }
             </Text>
           </Card>
         ))}
-      </View>
+      </View> : null}
     </View>
   );
+}
+
+function WebObservationMap({
+  observations,
+  authorization,
+  fillAvailableSpace,
+  onSelect,
+  onFailure,
+}: {
+  observations: Observation[];
+  authorization: string;
+  fillAvailableSpace: boolean;
+  onSelect: (id: string) => void;
+  onFailure: (message: string) => void;
+}) {
+  const container = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!container.current) return;
+    const map = new MapLibreMap({
+      container: container.current,
+      style: LANTMATERIET_MAP_STYLE,
+      center: [15.5, 62],
+      zoom: 4,
+      minZoom: 0,
+      maxZoom: 14,
+      attributionControl: false,
+      transformRequest: (url) =>
+        url.startsWith(`${LANTMATERIET_HOST}/open/topowebb-ccby/v1/wmts`)
+          ? { url, headers: { Authorization: authorization } }
+          : { url },
+    });
+    map.addControl(new AttributionControl({ compact: true }), "bottom-right");
+    const handleError = (event: ErrorEvent) => {
+      const message = event.error?.message ?? "";
+      if (/401|403|fetch|network|image/i.test(message)) {
+        onFailure("Lantmäteriets karta kunde inte läsas in. Koordinatnätet visas i stället.");
+      }
+    };
+    map.on("error", handleError);
+    map.on("load", () => {
+      map.addSource("observations", {
+        type: "geojson",
+        data: observationPoints(observations),
+      });
+      map.addLayer({
+        id: "observation-points",
+        type: "circle",
+        source: "observations",
+        paint: {
+          "circle-radius": 8,
+          "circle-color": colors.green700,
+          "circle-stroke-color": "#FFFFFF",
+          "circle-stroke-width": 2,
+        },
+      });
+      map.on("click", "observation-points", (event) => {
+        const id = event.features?.[0]?.properties?.id;
+        if (typeof id === "string") onSelect(id);
+      });
+      map.on("mouseenter", "observation-points", () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "observation-points", () => {
+        map.getCanvas().style.cursor = "";
+      });
+      const bounds = getWgs84Bounds(observations);
+      if (bounds) {
+        map.fitBounds(
+          [
+            [bounds[0], bounds[1]],
+            [bounds[2], bounds[3]],
+          ],
+          { padding: 48, duration: 0, maxZoom: 14 },
+        );
+      }
+    });
+    return () => map.remove();
+  }, [authorization, observations, onFailure, onSelect]);
+
+  return (
+    <View style={[styles.mapFrame, fillAvailableSpace && styles.mapFrameFill]}>
+      <div ref={container} style={{ height: "100%", width: "100%" }} />
+    </View>
+  );
+}
+
+function observationPoints(observations: Observation[]): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  return {
+    type: "FeatureCollection",
+    features: observations.map((observation) => ({
+      type: "Feature",
+      id: observation.id,
+      properties: { id: observation.id },
+      geometry: {
+        type: "Point",
+        coordinates: [observation.position.wgs84.longitude, observation.position.wgs84.latitude],
+      },
+    })),
+  };
+}
+
+function getWgs84Bounds(
+  observations: Observation[],
+): [number, number, number, number] | undefined {
+  if (!observations.length) return undefined;
+  const latitudes = observations.map((item) => item.position.wgs84.latitude);
+  const longitudes = observations.map((item) => item.position.wgs84.longitude);
+  const minLatitude = Math.min(...latitudes);
+  const maxLatitude = Math.max(...latitudes);
+  const minLongitude = Math.min(...longitudes);
+  const maxLongitude = Math.max(...longitudes);
+  const longitudePad = Math.max((maxLongitude - minLongitude) * 0.1, 0.002);
+  const latitudePad = Math.max((maxLatitude - minLatitude) * 0.1, 0.001);
+  return [
+    minLongitude - longitudePad,
+    minLatitude - latitudePad,
+    maxLongitude + longitudePad,
+    maxLatitude + latitudePad,
+  ];
+}
+
+function mapNotice(status: ReturnType<typeof useLantmaterietMapAccess>["status"]): string {
+  if (status === "loading") return "Kontrollerar kartanslutningen";
+  if (status === "missing") return "Lantmäteriets karta är inte ansluten";
+  return "Lantmäteriets karta är inte tillgänglig";
+}
+
+function mapNoticeDetails(access: ReturnType<typeof useLantmaterietMapAccess>): string {
+  if (access.status === "loading") return "Observationerna visas på koordinatnätet under tiden.";
+  if (access.status === "missing") {
+    return "Lägg till uppgifterna under Inställningar. De används bara under den här webbsessionen.";
+  }
+  if (access.status === "unavailable") return `${access.message} Koordinatnätet visas i stället.`;
+  return "Koordinatnätet visas i stället.";
 }
 
 function CoordinatePlot({
   observations,
   selectedId,
   onSelect,
+  fillAvailableSpace,
 }: {
   observations: Observation[];
   selectedId?: string;
   onSelect: (id: string) => void;
+  fillAvailableSpace: boolean;
 }) {
   const [size, setSize] = useState({ width: 1, height: 1 });
   const bounds = getCoordinateBounds(observations);
@@ -64,7 +236,7 @@ function CoordinatePlot({
     setSize({ width, height });
   }
   return (
-    <View style={styles.mapFrame} onLayout={handleLayout}>
+    <View style={[styles.mapFrame, fillAvailableSpace && styles.mapFrameFill]} onLayout={handleLayout}>
       <View style={styles.gridHorizontalOne} />
       <View style={styles.gridHorizontalTwo} />
       <View style={styles.gridVerticalOne} />
@@ -155,6 +327,7 @@ function projectPoint(
 
 const styles = StyleSheet.create({
   wrapper: { gap: spacing.md },
+  wrapperFill: { flex: 1, minHeight: 0 },
   mapFrame: {
     height: 380,
     borderRadius: 14,
@@ -164,6 +337,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     position: "relative",
   },
+  mapFrameFill: { flex: 1, height: undefined, minHeight: 220 },
   gridHorizontalOne: { position: "absolute", left: 0, right: 0, top: "33%", height: 1, backgroundColor: "#D8DECF" },
   gridHorizontalTwo: { position: "absolute", left: 0, right: 0, top: "66%", height: 1, backgroundColor: "#D8DECF" },
   gridVerticalOne: { position: "absolute", top: 0, bottom: 0, left: "33%", width: 1, backgroundColor: "#D8DECF" },
