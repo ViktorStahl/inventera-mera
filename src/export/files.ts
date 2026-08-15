@@ -2,21 +2,20 @@ import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 
 import type { SurveyBackup } from "@/domain/models";
-import { getSpeciesList, getSurvey, listLocales, listObservations } from "@/storage/database";
+import { getSurvey, listLocales, listObservations } from "@/storage/database";
 import { createSurveyWorkbook, sanitizeFileName } from "./xlsx";
 
 export async function shareSurveyExcel(surveyId: string): Promise<string> {
   const survey = await getSurvey(surveyId);
   if (!survey) throw new Error("Inventeringen kunde inte hittas.");
-  const [locales, observations, speciesList] = await Promise.all([
+  const [locales, observations] = await Promise.all([
     listLocales(surveyId),
     listObservations(surveyId),
-    survey.speciesListId ? getSpeciesList(survey.speciesListId) : Promise.resolve(null),
   ]);
   const name = `${sanitizeFileName(survey.title)}_${survey.surveyDate}.xlsx`;
   const file = new File(Paths.cache, name);
   file.create({ overwrite: true });
-  file.write(createSurveyWorkbook(survey, locales, observations, speciesList ?? undefined));
+  file.write(createSurveyWorkbook(survey, locales, observations));
   await share(file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   return file.uri;
 }

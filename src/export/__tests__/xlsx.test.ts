@@ -1,7 +1,8 @@
 import { strFromU8, unzipSync } from "fflate";
 
-import type { Observation, SpeciesList, Survey, SurveyLocale } from "@/domain/models";
+import type { Observation, Survey, SurveyLocale } from "@/domain/models";
 import {
+  ARTPORTALEN_HEADERS,
   createSurveyWorkbook,
   EXCEL_ACCURACY_METERS,
   roundAccuracyForExcel,
@@ -11,7 +12,11 @@ import {
 const survey: Survey = {
   id: "survey-1",
   title: "Ängsmark vid Lillåsen",
-  taxonomyRef: { packageId: "vascular-plants-starter", name: "Kärlväxter – startlista", version: "2026-07-mvp" },
+  taxonomyRef: {
+    packageId: "vascular-plants-starter",
+    name: "Kärlväxter – startlista",
+    version: "2026-07-mvp",
+  },
   surveyDate: "2026-07-31",
   status: "active",
   createdAt: "2026-07-31T08:00:00.000Z",
@@ -46,36 +51,39 @@ const observation: Observation = {
   positionOverridden: false,
   position: locale.position,
   species: { source: "free-text", enteredName: "=Farlig formel" },
-  publicComment: "Fuktig äng",
+  publicComment: "Publik kommentar",
   additionalObservers: ["Ada", "Bo"],
   createdAt: "2026-07-31T08:14:00.000Z",
   updatedAt: "2026-07-31T08:14:00.000Z",
 };
 
-const speciesList: SpeciesList = {
-  id: "list-1",
-  name: "Fjällväxter",
-  taxonomyRef: survey.taxonomyRef!,
-  createdAt: survey.createdAt,
-  updatedAt: survey.updatedAt,
-};
-
 describe("Excel export", () => {
-  it("emits a locale sheet and the exact mandatory Swedish observation headers", () => {
-    const files = unzipSync(createSurveyWorkbook(survey, [locale], [observation]));
-    const locales = strFromU8(files["xl/worksheets/sheet2.xml"]!);
-    const observations = strFromU8(files["xl/worksheets/sheet3.xml"]!);
+  it("matches the fixed single-sheet Artportalen column contract", () => {
+    const workbook = readWorkbook([observation]);
 
-    expect(locales).toContain(">Lokalnamn</t>");
-    expect(locales).toContain(">Lillåsen, norra delen</t>");
-    for (const header of ["Artnamn", "Lokalnamn", "Ost", "Nord", "Noggrannhet", "Startdatum", "Publik kommentar", "Med-observatör"]) {
-      expect(observations).toContain(`>${header}</t>`);
-    }
-    expect(observations).not.toContain(">Antal</t>");
-    expect(observations).not.toContain(">Enhet</t>");
-    expect(observations).toContain("&apos;=Farlig formel");
-    expect(locales).toContain('<c r="D2" s="0"><v>5</v></c>');
-    expect(observations).toContain('<c r="E2" s="0"><v>5</v></c>');
+    expect(Object.keys(workbook.files).filter((name) => name.startsWith("xl/worksheets/"))).toEqual([
+      "xl/worksheets/sheet1.xml",
+    ]);
+    expect(workbook.workbookXml).toContain('<sheet name="Sheet1" sheetId="1" r:id="rId1"/>');
+    expect(readRow(workbook.sheetXml, workbook.sharedStrings, 1)).toEqual(ARTPORTALEN_HEADERS);
+    expect(readRow(workbook.sheetXml, workbook.sharedStrings, 2)).toEqual([
+      "'=Farlig formel",
+      6400000,
+      1300000,
+      "5m",
+      "",
+      "",
+      46234,
+      (10 * 60 + 14) / (24 * 60),
+      "Lillåsen, norra delen",
+      "Fuktig äng",
+      "Publik kommentar",
+      "Ada; Bo",
+    ]);
+    expect(workbook.sheetXml).toContain('<c r="G2" s="2"><v>46234</v></c>');
+    expect(workbook.sheetXml).toContain(`<c r="H2" s="3"><v>${(10 * 60 + 14) / (24 * 60)}</v></c>`);
+    expect(workbook.stylesXml).toContain('formatCode="yyyy-mm-dd"');
+    expect(workbook.stylesXml).toContain('formatCode="hh:mm"');
   });
 
   it("rounds export accuracy to the closest approved metre value", () => {
@@ -92,26 +100,89 @@ describe("Excel export", () => {
     expect(roundAccuracyForExcel(8000)).toBe(5000);
   });
 
-  it("includes both Antal and Enhet when any row has amount", () => {
-    const withAmount: Observation = { ...observation, amount: { value: 0, unit: "plantor/tuvor" } };
-    const files = unzipSync(createSurveyWorkbook(survey, [locale], [withAmount]));
-    const sheet = strFromU8(files["xl/worksheets/sheet3.xml"]!);
-    expect(sheet).toContain(">Antal</t>");
-    expect(sheet).toContain(">Enhet</t>");
-    expect(sheet).toContain(">plantor/tuvor</t>");
+  it("always includes both amount columns and preserves a zero amount with its unit", () => {
+    const withAmount: Observation = {
+      ...observation,
+      amount: { value: 0, unit: "plantor/tuvor" },
+    };
+    const workbook = readWorkbook([withAmount]);
+
+    expect(readRow(workbook.sheetXml, workbook.sharedStrings, 2).slice(4, 6)).toEqual([
+      0,
+      "plantor/tuvor",
+    ]);
   });
 
-  it("includes the selected species list in survey metadata", () => {
-    const files = unzipSync(createSurveyWorkbook(survey, [locale], [observation], speciesList));
-    const sheet = strFromU8(files["xl/worksheets/sheet1.xml"]!);
-    expect(sheet).toContain(">Artlista</t>");
-    expect(sheet).toContain(">Fjällväxter</t>");
-    expect(sheet).not.toContain(">Län</t>");
-    expect(sheet).not.toContain(">Kommun</t>");
-    expect(sheet).not.toContain(">Område</t>");
+  it("writes missing optional values as blank cells", () => {
+    const withoutOptionals: Observation = {
+      ...observation,
+      position: { ...observation.position, accuracyMeters: undefined },
+      publicComment: undefined,
+      additionalObservers: [],
+    };
+    const localeWithoutNote: SurveyLocale = { ...locale, note: undefined };
+    const files = unzipSync(createSurveyWorkbook(survey, [localeWithoutNote], [withoutOptionals]));
+    const sheetXml = strFromU8(files["xl/worksheets/sheet1.xml"]!);
+    const sharedStrings = readSharedStrings(strFromU8(files["xl/sharedStrings.xml"]!));
+
+    expect(readRow(sheetXml, sharedStrings, 2).slice(3, 6)).toEqual(["", "", ""]);
+    expect(readRow(sheetXml, sharedStrings, 2).slice(9, 12)).toEqual(["", "", ""]);
+    expect(sheetXml).toContain('<c r="D2" s="0"/>');
+    expect(sheetXml).toContain('<c r="L2" s="0"/>');
+  });
+
+  it("keeps the fixed headers for an empty survey", () => {
+    const workbook = readWorkbook([]);
+
+    expect(readRow(workbook.sheetXml, workbook.sharedStrings, 1)).toEqual(ARTPORTALEN_HEADERS);
+    expect(workbook.sheetXml).toContain('<dimension ref="A1:L1"/>');
+    expect(workbook.sheetXml).not.toContain('<row r="2">');
   });
 
   it("sanitizes unsafe file names", () => {
     expect(sanitizeFileName('A/B: "test"')).toBe("A-B- -test-");
   });
 });
+
+function readWorkbook(observations: Observation[]): {
+  files: Record<string, Uint8Array>;
+  workbookXml: string;
+  sheetXml: string;
+  sharedStrings: string[];
+  stylesXml: string;
+} {
+  const files = unzipSync(createSurveyWorkbook(survey, [locale], observations));
+  return {
+    files,
+    workbookXml: strFromU8(files["xl/workbook.xml"]!),
+    sheetXml: strFromU8(files["xl/worksheets/sheet1.xml"]!),
+    sharedStrings: readSharedStrings(strFromU8(files["xl/sharedStrings.xml"]!)),
+    stylesXml: strFromU8(files["xl/styles.xml"]!),
+  };
+}
+
+function readSharedStrings(xml: string): string[] {
+  return [...xml.matchAll(/<si><t xml:space="preserve">(.*?)<\/t><\/si>/g)].map((match) =>
+    unescapeXml(match[1]!),
+  );
+}
+
+function readRow(xml: string, sharedStrings: string[], rowNumber: number): (string | number)[] {
+  const row = new RegExp(`<row r="${rowNumber}">(.*?)<\\/row>`).exec(xml)?.[1];
+  if (!row) throw new Error(`Missing row ${rowNumber}`);
+  return [
+    ...row.matchAll(/<c r="[A-Z]+\d+" s="\d+"(?: t="(s)")?(?:><v>(.*?)<\/v><\/c>|\/>)/g),
+  ].map((match) => {
+    if (match[2] == null) return "";
+    return match[1] === "s" ? sharedStrings[Number(match[2])]! : Number(match[2]);
+  });
+}
+
+function unescapeXml(value: string): string {
+  return value
+    .replaceAll("&apos;", "'")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&gt;", ">")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&amp;", "&");
+}

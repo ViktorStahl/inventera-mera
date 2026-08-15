@@ -1,7 +1,7 @@
 # Inventera mera — product and technical design
 
 Status: MVP implemented; remaining sections describe the production-capable target  
-Last updated: 2026-08-12
+Last updated: 2026-08-15
 
 Platform decision: React Native with Expo for iOS and Android, plus an Expo Web
 browser preview. Native remains the field-production target.
@@ -138,7 +138,8 @@ independent of platform views where practical.
   precede a single inline accordion for time and position. Its compact header
   says whether those values follow the locale or are specific to the
   observation; its fields open directly beneath that header in the same box.
-- Excel uses the Swedish interchange columns defined in section 11.
+- Excel uses the single-sheet Artportalen interchange layout from the provided
+  `example.xlsx`, with the exact fixed columns and cell types in section 11.
 - Excel rounds `Noggrannhet` to the nearest supported metre class: `1`, `5`,
   `10`, `25`, `50`, `75`, `100`, `125`, `150`, `200`, `250`, `300`, `400`,
   `500`, `750`, `1000`, `1500`, `2000`, `2500`, `3000`, or `5000`. Exact ties
@@ -803,72 +804,52 @@ and lastUsedAt.
 ## 11. Excel export contract
 
 Generate `<sanitized survey title>_<YYYY-MM-DD>.xlsx` in the application cache
-or document directory, without uploading data. The workbook contains:
-
-### Sheet `Survey`
-
-| Field | Value |
-| --- | --- |
-| Survey ID | UUID |
-| Title | Survey title |
-| Description | Optional description |
-| Survey date | ISO date |
-| Taxonomy | Name, source, and version |
-| Species list | Selected list name, or `Ingen` |
-| Locale count | Integer |
-| Observation count | Integer |
-| Exported at | ISO timestamp with offset |
-| Application/schema version | Version identifiers |
-
-### Sheet `Locales`
-
-One row per locale with `Lokalnamn`, `Ost`, `Nord`, `Noggrannhet`,
-`Startdatum`, `Anteckning`, and `Antal observationer`. This is contextual app
-data; the mandatory external observation interchange contract remains on the
-next sheet. `Noggrannhet` uses the same rounded export class as observations.
-
-### Sheet `Observations`
-
-One row per observation, sorted by `observedAt`. The first eight column names
-are mandatory and exact:
+or document directory, without uploading data. To match the Artportalen import
+example, the workbook contains exactly one worksheet named `Sheet1`. It has one
+row per observation, sorted by `observedAt`, and these 12 fixed columns in this
+exact order:
 
 | Column | Mapping |
 | --- | --- |
 | `Artnamn` | Preferred-name snapshot when available; otherwise the exact free-text/entered name |
-| `Lokalnamn` | Current name of the observation's owning locale |
-| `Ost` | RT90 easting (Y), numeric metres |
 | `Nord` | RT90 northing (X), numeric metres |
-| `Noggrannhet` | Location accuracy rounded to the nearest supported metre class; blank when unknown |
-| `Startdatum` | Observation date/time as a real Excel date cell, displayed `yyyy-mm-dd hh:mm` |
+| `Ost` | RT90 easting (Y), numeric metres |
+| `Noggrannhet` | Rounded metre class as text with the `m` suffix, for example `25m`; blank when unknown |
+| `Antal` | Numeric amount; blank when absent |
+| `Enhet` | Restricted amount unit; blank when amount is absent |
+| `Startdatum` | Local observation date as a real Excel date cell, displayed `yyyy-mm-dd` |
+| `Starttid` | Local observation time as a real Excel time cell, displayed `hh:mm` |
+| `Lokalnamn` | Current name of the observation's owning locale |
+| `Biotop-beskrivning` | Owning locale's note; blank when absent |
 | `Publik kommentar` | Public comment; blank when absent |
 | `Med-observatör` | Additional observer names joined with `; `; blank when absent |
 
-`Antal` is optional at workbook level. If at least one observation has an
-amount, append both `Antal` and `Enhet`; never emit one without the other. Rows
-without an amount leave both cells blank. Application validation guarantees
-that every numeric `Antal` uses one of `stjälkar/strån/skott`, `plantor/tuvor`,
-`m2`, `dm2`, or `cm2` in `Enhet`.
+`Antal` and `Enhet` are always present as a pair so every export has the same
+Artportalen-compatible header. Rows without an amount leave both cells blank;
+never populate only one. Application validation guarantees that every numeric
+`Antal` uses one of `stjälkar/strån/skott`, `plantor/tuvor`, `m2`, `dm2`, or
+`cm2` in `Enhet`.
 
 The supported `Noggrannhet` classes are `1`, `5`, `10`, `25`, `50`, `75`,
 `100`, `125`, `150`, `200`, `250`, `300`, `400`, `500`, `750`, `1000`, `1500`,
 `2000`, `2500`, `3000`, and `5000` metres. Export chooses the closest value,
 breaks an exact midpoint upward, clamps below/above the range to `1`/`5000`,
-and leaves unknown accuracy blank. The original value remains in SQLite and
-the lossless JSON backup.
+adds the `m` suffix required by the example, and leaves unknown accuracy blank.
+The original value remains in SQLite and the lossless JSON backup.
 
-Keep this sheet limited to the interchange columns above so downstream imports
-are not broken by application metadata. The `Survey` sheet carries contextual
-metadata, and the JSON backup carries the complete lossless record including
-IDs, taxonomy provenance, both coordinate systems, and audit timestamps.
+Keep the workbook limited to the interchange columns above so downstream
+imports are not broken by application metadata. The JSON backup carries the
+complete lossless record including survey and locale metadata, IDs, taxonomy
+provenance, both coordinate systems, and audit timestamps.
 
-Freeze/filter the header row, wrap comments, and prevent strings beginning with
-`=`, `+`, `-`, or `@` from becoming formulas (formula injection). Display an
-explicit success/failure result and test Swedish characters, long comments,
-free-text species, multiple observers, blank accuracy, zero amount with unit,
-conditional amount columns, and an empty survey. Offer the native share sheet
-after generation and a `Save to Files` or equivalent platform action. Delete
-temporary export files according to a clear retention policy; do not delete
-explicit backups.
+Prevent strings beginning with `=`, `+`, `-`, or `@` from becoming formulas
+(formula injection). Display an explicit success/failure result and test exact
+header order, Swedish characters, locale-note mapping, separate date/time
+cells, long comments, free-text species, multiple observers, blank accuracy,
+zero amount with unit, and an empty survey. Offer the native share sheet after
+generation and a `Save to Files` or equivalent platform action. Delete temporary
+export files according to a clear retention policy; do not delete explicit
+backups.
 
 ## 12. Accessibility and responsive behaviour
 
@@ -997,7 +978,8 @@ treat simulator or Expo Go results as release verification.
 - Lantmäteriet raster map regions can be downloaded, rendered, and removed on
   supported devices under the approved source terms; markers still work when
   no package covers the viewport.
-- Export produces the documented three-sheet `.xlsx` fully offline.
+- Export produces the documented Artportalen-compatible single-sheet `.xlsx`
+  fully offline.
 - Required map/taxonomy attribution and provenance are visible.
 
 ### Phase 4 — production hardening
