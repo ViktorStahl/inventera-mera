@@ -24,6 +24,7 @@ import type {
   TaxonomyReference,
 } from "@/domain/models";
 import { speciesKey } from "@/domain/species";
+import { calculateStatisticsSummary, type StatisticsObservation, type StatisticsSummary } from "@/domain/statistics";
 import { migrateLegacyObservations, type LegacyObservation } from "./migrateLocales";
 import {
   localeDraftKey,
@@ -361,6 +362,28 @@ async function updateSurveyArchiveStatus(id: string, status: Survey["status"]): 
   return updated;
 }
 
+export async function getStatisticsSummary(): Promise<StatisticsSummary> {
+  const state = await getDatabase();
+  const surveys = state.surveys.filter(
+    (survey) => survey.status === "active" || survey.status === "archived",
+  );
+  const surveyIds = new Set(surveys.map((survey) => survey.id));
+  const localesById = new Map<string, SurveyLocale>();
+  for (const locale of state.locales) localesById.set(locale.id, locale);
+
+  const observations: StatisticsObservation[] = [];
+  for (const observation of state.observations) {
+    const locale = localesById.get(observation.localeId);
+    if (!locale || !surveyIds.has(locale.surveyId)) continue;
+    observations.push({
+      observedAt: observation.timeOverridden ? observation.observedAt : locale.observedAt,
+      timeZone: observation.timeOverridden ? observation.timeZone : locale.timeZone,
+      species: observation.species,
+    });
+  }
+
+  return calculateStatisticsSummary(surveys.length, observations);
+}
 
 export async function listLocales(surveyId: string): Promise<LocaleListItem[]> {
   const state = await getDatabase();

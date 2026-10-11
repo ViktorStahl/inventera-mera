@@ -459,6 +459,27 @@ reachable. It is only a hint; each network request handles timeout/failure
 independently. Never tell a user that local-only data has synced when cloud
 synchronization is not part of the release.
 
+### 5.9 Statistics
+
+- The main survey list has a secondary `Statistik` button alongside its species-list and settings actions.
+- Statistics are calculated locally from every active and archived survey.
+  Permanently deleted surveys are absent because their records are cascaded away.
+- Show total observations, average observations per retained survey, observations
+  per month, and the three most-observed species. Do not show survey or locale
+  names or per-survey/per-locale counts.
+- The average denominator includes retained surveys with zero observations.
+  If there are no surveys, show no average and an empty state.
+- Monthly counts use each observation's effective timestamp and stored time
+  zone. The bar chart shows the current device-local calendar month and the 11
+  months before it, including zero-count months. Older data still contributes
+  to totals and species rankings.
+- Species are grouped by the shared `speciesKey` identity rule:
+  taxonomy package plus taxon ID, or normalized free-text name. Count each
+  observation once, regardless of amount, and display names from snapshots.
+- Compute the summary on view focus from existing local data. Do not cache
+  statistics in a new table, call a remote analytics service, or add a chart
+  dependency. Use accessible native rows/bars for the monthly trend.
+
 ## 6. Domain model
 
 All IDs are client-generated UUID v4 values. All records include `createdAt`,
@@ -1085,6 +1106,9 @@ treat simulator or Expo Go results as release verification.
   archived survey contents are view-only, with map viewing and export available.
   Locale/observation deletion is disabled while archived. Permanent survey
   deletion is available only after archive.
+- User can open aggregate statistics from the main survey list while offline.
+  Totals and the survey average include active and archived surveys; permanently
+  deleted surveys are excluded. No survey or locale breakdown is shown.
 - User can add/edit/delete locales with name, time, coordinate, and note.
 - User can add/edit/delete observations with current/new or inherited time and
   coordinate according to the locale defaults, free-text species, optional

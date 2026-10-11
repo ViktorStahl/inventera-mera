@@ -152,6 +152,11 @@ export default function SurveyListScreen() {
               onPress={() => router.push("/settings" as Href)}
             />
             <Button
+              label="Statistik"
+              variant="secondary"
+              onPress={() => router.push("/statistics" as Href)}
+            />
+            <Button
               label="Återställ JSON-backup"
               variant="secondary"
               loading={restoring}

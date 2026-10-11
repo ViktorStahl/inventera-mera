@@ -28,6 +28,7 @@ import type {
   TaxonomyReference,
 } from "@/domain/models";
 import { speciesKey } from "@/domain/species";
+import { calculateStatisticsSummary, type StatisticsObservation, type StatisticsSummary } from "@/domain/statistics";
 import { migrateLegacyObservations, type LegacyObservation } from "./migrateLocales";
 import {
   localeDraftKey,
@@ -584,6 +585,34 @@ export async function listSurveys(search = "", includeArchived = false): Promise
     localeCount: row.locale_count,
     observationCount: row.observation_count,
   }));
+}
+export async function getStatisticsSummary(): Promise<StatisticsSummary> {
+  const database = await getDatabase();
+  const [surveyCountRow, observationRows] = await Promise.all([
+    database.getFirstAsync<{ survey_count: number }>(
+      "SELECT count(*) AS survey_count FROM surveys WHERE status IN ('active', 'archived')",
+    ),
+    database.getAllAsync<{
+      observed_at: string;
+      time_zone: string;
+      species_json: string;
+    }>(
+      "SELECT coalesce(observations.observed_at_override, locales.observed_at) AS observed_at, " +
+        "coalesce(observations.time_zone_override, locales.time_zone) AS time_zone, " +
+        "observations.species_json " +
+        "FROM observations " +
+        "JOIN locales ON locales.id = observations.locale_id " +
+        "JOIN surveys ON surveys.id = locales.survey_id " +
+        "WHERE surveys.status IN ('active', 'archived')",
+    ),
+  ]);
+
+  const observations: StatisticsObservation[] = observationRows.map((row) => ({
+    observedAt: row.observed_at,
+    timeZone: row.time_zone,
+    species: JSON.parse(row.species_json) as SpeciesSnapshot,
+  }));
+  return calculateStatisticsSummary(surveyCountRow?.survey_count ?? 0, observations);
 }
 
 export async function getSurvey(id: string): Promise<Survey | null> {

@@ -334,4 +334,126 @@ describe("browser storage", () => {
     await repository.deleteSurvey(survey.id);
     expect(await repository.getSurvey(survey.id)).toBeNull();
   });
+  it("summarizes active and archived observations and drops them after survey deletion", async () => {
+    const before = await repository.getStatisticsSummary();
+    const surveyDraft: SurveyDraft = {
+      title: "Statistik",
+      description: "",
+      surveyDate: "2001-01-01",
+      taxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId,
+      speciesListId: "",
+    };
+    const activeSurvey = await repository.createSurvey(surveyDraft);
+    const emptySurvey = await repository.createSurvey({ ...surveyDraft, title: "Tom inventering" });
+    const archivedSurvey = await repository.createSurvey({ ...surveyDraft, title: "Arkiverad statistik" });
+    const position: SurveyLocale["position"] = {
+      wgs84: { latitude: 57.7, longitude: 11.9 },
+      rt90: { northing: 6400000, easting: 1300000, crs: "EPSG:3847" },
+      source: "manual-rt90",
+    };
+
+    async function createLocale(
+      surveyId: string,
+      name: string,
+      observedAt: string,
+      timeZone: string,
+    ) {
+      return repository.createLocale({
+        surveyId,
+        name,
+        observedAt,
+        timeZone,
+        position,
+        useLocaleTimeByDefault: false,
+        useLocalePositionByDefault: false,
+      });
+    }
+
+    async function createObservation(
+      surveyId: string,
+      locale: SurveyLocale,
+      species: Observation["species"],
+      observedAtOverride?: string,
+      timeZoneOverride?: string,
+    ) {
+      return repository.createObservation({
+        surveyId,
+        localeId: locale.id,
+        localityName: locale.name,
+        observedAt: observedAtOverride ?? locale.observedAt,
+        timeZone: timeZoneOverride ?? locale.timeZone,
+        position: locale.position,
+        timeOverridden: observedAtOverride !== undefined,
+        positionOverridden: false,
+        species,
+        additionalObservers: [],
+      });
+    }
+
+    const activeLocale = await createLocale(
+      activeSurvey.id,
+      "Aktiv lokal",
+      "2001-01-31T23:30:00-05:00",
+      "America/New_York",
+    );
+    const archivedLocale = await createLocale(
+      archivedSurvey.id,
+      "Arkiverad lokal",
+      "2001-03-01T00:30:00+01:00",
+      "Europe/Stockholm",
+    );
+    await createObservation(activeSurvey.id, activeLocale, {
+      source: "free-text",
+      enteredName: "Alm",
+    });
+    await createObservation(archivedSurvey.id, archivedLocale, {
+      source: "free-text",
+      enteredName: "Daggkåpa",
+    });
+    await createObservation(
+      archivedSurvey.id,
+      archivedLocale,
+      { source: "free-text", enteredName: "Daggkåpa" },
+      "2001-02-01T00:30:00+01:00",
+      "Europe/Stockholm",
+    );
+    await repository.archiveSurvey(archivedSurvey.id);
+
+    const withArchived = await repository.getStatisticsSummary();
+    expect(withArchived.totalObservations).toBe(before.totalObservations + 3);
+    expect(withArchived.surveyCount).toBe(before.surveyCount + 3);
+    expect(withArchived.averageObservationsPerSurvey).toBe(
+      (before.totalObservations + 3) / (before.surveyCount + 3),
+    );
+    expect(withArchived.observationsByMonth).toContainEqual({
+      month: "2001-01",
+      observationCount: 1,
+    });
+    expect(withArchived.observationsByMonth).toContainEqual({
+      month: "2001-02",
+      observationCount: 1,
+    });
+    expect(withArchived.observationsByMonth).toContainEqual({
+      month: "2001-03",
+      observationCount: 1,
+    });
+    expect(withArchived.topSpecies[0]).toMatchObject({
+      name: "Daggkåpa",
+      observationCount: 2,
+    });
+    expect(Object.keys(withArchived).sort()).toEqual([
+      "averageObservationsPerSurvey",
+      "observationsByMonth",
+      "surveyCount",
+      "topSpecies",
+      "totalObservations",
+    ]);
+
+    await repository.deleteSurvey(archivedSurvey.id);
+    const afterDeletion = await repository.getStatisticsSummary();
+    expect(afterDeletion.totalObservations).toBe(before.totalObservations + 1);
+    expect(afterDeletion.surveyCount).toBe(before.surveyCount + 2);
+    expect(afterDeletion.topSpecies.some((species) => species.name === "Daggkåpa")).toBe(false);
+    expect(await repository.getSurvey(emptySurvey.id)).not.toBeNull();
+  });
 });

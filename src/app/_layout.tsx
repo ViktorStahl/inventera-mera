@@ -21,6 +21,7 @@ export default function RootLayout() {
         >
             <Stack.Screen name="index" options={{ headerShown: false }} />
             <Stack.Screen name="surveys/index" options={{ title: "Inventeringar" }} />
+            <Stack.Screen name="statistics" options={{ title: "Statistik" }} />
             <Stack.Screen name="surveys/new" options={{ title: "Ny inventering", presentation: "modal" }} />
             <Stack.Screen name="surveys/[surveyId]/index" options={{ title: "Inventering" }} />
             <Stack.Screen
