@@ -157,6 +157,10 @@ independent of platform views where practical.
   `500`, `750`, `1000`, `1500`, `2000`, `2500`, `3000`, or `5000`. Exact ties
   use the higher class; values outside the range use the nearest endpoint. This
   export normalization never changes the locally stored accuracy.
+- Excel rounds `Nord` and `Ost` to the nearest whole metre and stores them as
+  numeric cells with the whole-number format `0`, so no decimal digits or
+  trailing decimal zeroes are displayed. Locally stored coordinate precision
+  remains unchanged.
 - The local-only MVP allows permanent survey deletion after explicit
   confirmation. It deletes the survey, its locales, their observations, and
   associated drafts in one local operation. Locale deletion similarly cascades
@@ -860,8 +864,8 @@ exact order:
 | Column | Mapping |
 | --- | --- |
 | `Artnamn` | Preferred-name snapshot when available; otherwise the exact free-text/entered name |
-| `Nord` | RT90 northing (X), numeric metres |
-| `Ost` | RT90 easting (Y), numeric metres |
+| `Nord` | RT90 northing (X), rounded to whole numeric metres and formatted with no decimal digits |
+| `Ost` | RT90 easting (Y), rounded to whole numeric metres and formatted with no decimal digits |
 | `Noggrannhet` | Rounded metre class as text with the `m` suffix, for example `25m`; blank when unknown |
 | `Antal` | Numeric amount; blank when absent |
 | `Enhet` | Restricted amount unit; blank when amount is absent |

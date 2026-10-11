@@ -86,6 +86,31 @@ describe("Excel export", () => {
     expect(workbook.stylesXml).toContain('formatCode="hh:mm"');
   });
 
+  it("rounds RT90 coordinates to whole numeric metres without decimal formatting", () => {
+    const withDecimalCoordinates: Observation = {
+      ...observation,
+      position: {
+        ...observation.position,
+        rt90: {
+          ...observation.position.rt90,
+          northing: 6400000.49,
+          easting: 1300000.5,
+        },
+      },
+    };
+    const workbook = readWorkbook([withDecimalCoordinates]);
+
+    expect(readRow(workbook.sheetXml, workbook.sharedStrings, 2).slice(1, 3)).toEqual([
+      6400000,
+      1300001,
+    ]);
+    expect(workbook.sheetXml).toContain('<c r="B2" s="4"><v>6400000</v></c>');
+    expect(workbook.sheetXml).toContain('<c r="C2" s="4"><v>1300001</v></c>');
+    expect(workbook.stylesXml).toContain(
+      '<xf numFmtId="1" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>',
+    );
+  });
+
   it("rounds export accuracy to the closest approved metre value", () => {
     expect(EXCEL_ACCURACY_METERS).toEqual([
       1, 5, 10, 25, 50, 75, 100, 125, 150, 200, 250, 300, 400, 500, 750,

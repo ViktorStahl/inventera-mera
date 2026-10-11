@@ -4,7 +4,7 @@ import type { Observation, Survey, SurveyLocale } from "@/domain/models";
 
 type Cell = {
   value: string | number;
-  kind: "blank" | "string" | "number" | "date" | "time";
+  kind: "blank" | "string" | "number" | "integer" | "date" | "time";
 };
 
 export const ARTPORTALEN_HEADERS = [
@@ -59,8 +59,8 @@ export function createSurveyWorkbook(
       const locale = localeById.get(observation.localeId);
       return [
         safeStringCell(observation.species.preferredName ?? observation.species.enteredName),
-        numberCell(observation.position.rt90.northing),
-        numberCell(observation.position.rt90.easting),
+        integerCell(observation.position.rt90.northing),
+        integerCell(observation.position.rt90.easting),
         observation.position.accuracyMeters == null
           ? blankCell()
           : stringCell(`${roundAccuracyForExcel(observation.position.accuracyMeters)}m`),
@@ -187,7 +187,7 @@ function cellXml(
     if (sharedStringIndex == null) throw new Error("Exceltexten kunde inte kodas.");
     return `<c r="${reference}" s="${header ? 1 : 0}" t="s"><v>${sharedStringIndex}</v></c>`;
   }
-  const style = cell.kind === "date" ? 2 : cell.kind === "time" ? 3 : 0;
+  const style = cell.kind === "date" ? 2 : cell.kind === "time" ? 3 : cell.kind === "integer" ? 4 : 0;
   return `<c r="${reference}" s="${style}"><v>${cell.value}</v></c>`;
 }
 
@@ -207,11 +207,12 @@ function stylesXml(): string {
       <fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFC6E0B4"/><bgColor indexed="64"/></patternFill></fill></fills>
       <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
       <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-      <cellXfs count="4">
+      <cellXfs count="5">
         <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
         <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>
         <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
         <xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+        <xf numFmtId="1" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
       </cellXfs>
       <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
     </styleSheet>`;
@@ -246,6 +247,10 @@ function stringCell(value: string): Cell {
 
 function numberCell(value: number): Cell {
   return { value, kind: "number" };
+}
+
+function integerCell(value: number): Cell {
+  return { value: Math.round(value), kind: "integer" };
 }
 
 function dateCell(value: number): Cell {
