@@ -4,7 +4,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "rea
 
 import type { LocaleListItem, SpeciesList, Survey } from "@/domain/models";
 import { localDateFromIso, localTimeFromIso } from "@/domain/time";
-import { shareSurveyBackup, shareSurveyExcel } from "@/export/files";
+import { shareSurveyBackup, shareSurveyExcel, shareSurveyGpx } from "@/export/files";
 import { dismissToSurveyList } from "@/navigation/hierarchy";
 import { buildSurveyBackup, deleteSurvey, getSpeciesList, getSurvey, listLocales } from "@/storage/database";
 import { Button } from "@/ui/Button";
@@ -23,7 +23,7 @@ export default function SurveyDetailScreen() {
   const [speciesList, setSpeciesList] = useState<SpeciesList>();
   const [locales, setLocales] = useState<LocaleListItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState<"excel" | "json">();
+  const [exporting, setExporting] = useState<"excel" | "gpx" | "json">();
   const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
@@ -68,6 +68,18 @@ export default function SurveyDetailScreen() {
       await shareSurveyBackup(await buildSurveyBackup(surveyId));
     } catch (error) {
       Alert.alert("JSON-backup", messageOf(error));
+    } finally {
+      setExporting(undefined);
+    }
+  }
+
+  async function exportGpx() {
+    if (!surveyId) return;
+    setExporting("gpx");
+    try {
+      await shareSurveyGpx(surveyId);
+    } catch (error) {
+      Alert.alert("GPX-export", messageOf(error));
     } finally {
       setExporting(undefined);
     }
@@ -166,6 +178,7 @@ export default function SurveyDetailScreen() {
       <View style={styles.exportSection}>
         <Text style={styles.sectionTitle}>Export och backup</Text>
         <Button label="Exportera till Excel" variant="secondary" loading={exporting === "excel"} disabled={Boolean(exporting)} onPress={() => void exportExcel()} />
+        <Button label="Exportera som GPX" variant="secondary" loading={exporting === "gpx"} disabled={Boolean(exporting)} onPress={() => void exportGpx()} />
         <Button label="Skapa JSON-backup" variant="secondary" loading={exporting === "json"} disabled={Boolean(exporting)} onPress={() => void exportJson()} />
       </View>
     </Screen>

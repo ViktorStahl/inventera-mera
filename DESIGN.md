@@ -17,7 +17,7 @@ survey list/search/create/open, locale creation, observations within locales,
 draft recovery, offline Dyntaxa taxonomy
 search with free text, reusable species lists with list-first suggestions and a
 default-taxonomy setting, RT90 input and device-position conversion, map filtering,
-Excel export, JSON backup/restore, and offline editing and permanent deletion of
+Excel and GPX export, JSON backup/restore, and offline editing and permanent deletion of
 surveys, locales, and observations. Data is persisted in SQLite on native
 devices and in origin-scoped browser storage in the web preview. Deletion
 cascades through the hierarchy and requires explicit destructive confirmation.
@@ -53,9 +53,8 @@ Inventera mera is a React Native mobile application, built with Expo and
 TypeScript, for recording wild-plant observations in the field. A user creates
 a survey, chooses a downloaded or custom taxonomy, creates named
 locales with a time and RT90 coordinate, records observations within those
-locales, reviews them in a list or on a map, and exports the survey to an Excel
-workbook. The supported production targets
-are iOS and Android phones.
+locales, reviews them in a list or on a map, and exports the survey to Excel or GPX.
+The supported production targets are iOS and Android phones.
 
 The field workflow is offline-first. Once the app and the selected taxonomy
 have been downloaded, loss of reception must not prevent a user from opening a
@@ -87,7 +86,7 @@ independent of platform views where practical.
 - Import and select user-provided taxonomy groups.
 - Always allow a species name to be saved as free text.
 - Show observations on a map and make an offline map package optional.
-- Export one survey and all of its observations to `.xlsx`.
+- Export one survey and all of its observations to `.xlsx` or `.gpx`.
 - Keep field data safe across application restarts, app updates, brief failures,
   and loss of connectivity.
 
@@ -110,7 +109,7 @@ independent of platform views where practical.
   foreground over a matching green background.
 - The MVP is local-only. It has no account, login, server-side survey storage,
   or synchronization. JSON backup/restore is the lossless transfer mechanism,
-  while Excel is the human/external-system export.
+  while Excel and GPX are the human/external-system exports.
 - Surveys do not store a county, municipality, region code, or free-text area.
   Location context belongs to named locales and their coordinates.
 - Amount is optional. When an amount is entered, a unit is required and must be
@@ -228,8 +227,9 @@ drafts over dense desktop controls.
 
 1. Switch between the observations list and map.
 2. Tap an observation or marker to view or edit its details.
-3. Open the survey menu and select `Export to Excel`.
-4. Save or share the generated workbook using the native OS share sheet.
+3. Choose `Exportera till Excel`, `Exportera som GPX`, or `Skapa JSON-backup`.
+4. Save or share the generated file using the native OS share sheet, or download
+   it in the browser.
 
 ## 4. Information architecture and routes
 
@@ -780,8 +780,9 @@ user confirmation before removing downloaded data.
 - Save the final observation in one transaction, then remove its draft.
 - Disable repeat submission while committing and enforce unique IDs so retrying
   cannot create a duplicate.
-- Provide downloadable JSON backup and validated restore in addition to Excel.
-  Excel is an interchange/report format, not a lossless application backup.
+- Provide downloadable JSON backup and validated restore in addition to Excel
+  and GPX. These are interchange/report formats, not lossless application
+  backups.
 - Keep the app usable if an application update, taxonomy update, or map download
   fails; report the failed optional operation separately.
 - The schema v1 → v2 migration preserves saved observations by creating locales
@@ -938,6 +939,18 @@ zero amount with unit, and an empty survey. Offer the native share sheet after
 generation and a `Save to Files` or equivalent platform action. Delete temporary
 export files according to a clear retention policy; do not delete explicit
 backups.
+
+## 11.1 GPX export
+
+Generate `<sanitized survey title>_<YYYY-MM-DD>.gpx` locally. The file uses GPX
+1.1 and contains one waypoint per observation, sorted by observation time.
+Waypoint latitude and longitude come from the observation's resolved canonical
+WGS84 position, never from RT90 values. Each waypoint includes the ISO 8601
+observation time and species name. Public comment uses GPX `cmt`; locale name,
+scientific name, amount/unit, reported accuracy, and additional observers are
+included in the description when available. XML text is escaped and invalid XML
+control characters are omitted. GPX export does not change source records or
+upload survey data.
 
 ## 12. Accessibility and responsive behaviour
 

@@ -3,6 +3,7 @@ import * as Sharing from "expo-sharing";
 
 import type { SurveyBackup } from "@/domain/models";
 import { getSurvey, listLocales, listObservations } from "@/storage/database";
+import { createSurveyGpx } from "./gpx";
 import { createSurveyWorkbook, sanitizeFileName } from "./xlsx";
 
 export async function shareSurveyExcel(surveyId: string): Promise<string> {
@@ -17,6 +18,18 @@ export async function shareSurveyExcel(surveyId: string): Promise<string> {
   file.create({ overwrite: true });
   file.write(createSurveyWorkbook(survey, locales, observations));
   await share(file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  return file.uri;
+}
+
+export async function shareSurveyGpx(surveyId: string): Promise<string> {
+  const survey = await getSurvey(surveyId);
+  if (!survey) throw new Error("Inventeringen kunde inte hittas.");
+  const observations = await listObservations(surveyId);
+  const name = `${sanitizeFileName(survey.title)}_${survey.surveyDate}.gpx`;
+  const file = new File(Paths.cache, name);
+  file.create({ overwrite: true });
+  file.write(createSurveyGpx(survey, observations));
+  await share(file, "application/gpx+xml");
   return file.uri;
 }
 
