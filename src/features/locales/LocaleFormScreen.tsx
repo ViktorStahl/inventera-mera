@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Switch, Text, View } from "react-native";
 
 import { rt90ToWgs84, wgs84ToRt90 } from "@/domain/coordinates";
-import type { LocaleDraft, SurveyLocale } from "@/domain/models";
+import type { LocaleDraft, Survey, SurveyLocale } from "@/domain/models";
 import {
   currentTimeZone,
   localDateFromIso,
@@ -27,6 +27,7 @@ import {
 } from "@/storage/database";
 import { useDraftAutosave } from "@/storage/useDraftAutosave";
 import { Button } from "@/ui/Button";
+import { Card } from "@/ui/Card";
 import { confirmDestructive } from "@/ui/confirm";
 import { messageOf } from "@/ui/errors";
 import { Field } from "@/ui/Field";
@@ -52,13 +53,14 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
   const { surveyId, localeId } = useLocalSearchParams<{ surveyId: string; localeId?: string }>();
   const router = useRouter();
   const [locale, setLocale] = useState<SurveyLocale>();
+  const [survey, setSurvey] = useState<Survey>();
   const [draft, setDraft] = useState<LocaleDraft>();
   const [errors, setErrors] = useState<ValidationErrors<LocaleDraft>>({});
   const [hydrated, setHydrated] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [locating, setLocating] = useState(false);
-  const draftKey = surveyId && (!editing || localeId)
+  const draftKey = survey?.status === "active" && surveyId && (!editing || localeId)
     ? editing
       ? localeEditDraftKey(surveyId, localeId!)
       : localeDraftKey(surveyId)
@@ -76,6 +78,7 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
     ])
       .then(([survey, loadedLocale, stored]) => {
         if (!survey) throw new Error("Inventeringen kunde inte hittas.");
+        setSurvey(survey);
         if (editing && !loadedLocale) throw new Error("Lokalen kunde inte hittas.");
         if (loadedLocale) setLocale(loadedLocale);
         const baseDraft = loadedLocale ? localeToDraft(loadedLocale) : emptyDraft();
@@ -222,6 +225,20 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
       Alert.alert("Lokalen kunde inte raderas", messageOf(error));
       setDeleting(false);
     }
+  }
+
+  if (survey?.status === "archived" && draft) {
+    return (
+      <Screen>
+        <Stack.Screen options={{ title: editing ? "Lokal (arkiverad)" : "Inventering arkiverad" }} />
+        <Card>
+          <Text style={styles.archivedTitle}>Inventeringen är arkiverad</Text>
+          <Text style={styles.sectionHint}>Innehållet är skrivskyddat. Lokaler och observationer kan bara visas och exporteras.</Text>
+          {locale ? <Text style={styles.sectionHint}>{locale.name} · {localDateFromIso(locale.observedAt)} {localTimeFromIso(locale.observedAt)} · Nord {Math.round(locale.position.rt90.northing)}, öst {Math.round(locale.position.rt90.easting)}{locale.note ? ` · ${locale.note}` : ""}</Text> : null}
+        </Card>
+        <Button label="Tillbaka" variant="ghost" onPress={() => router.back()} />
+      </Screen>
+    );
   }
 
   if (!draft) {
@@ -401,6 +418,7 @@ function LocaleDefaultSwitch({
 
 const styles = StyleSheet.create({
   center: { alignItems: "center", justifyContent: "center" },
+  archivedTitle: { color: colors.warning, fontSize: 18, fontWeight: "700" },
   twoColumns: { flexDirection: "row", gap: spacing.md, alignItems: "flex-start" },
   column: { flex: 1 },
   sectionTitle: { color: colors.text, fontSize: 16, fontWeight: "700", marginBottom: -spacing.sm },

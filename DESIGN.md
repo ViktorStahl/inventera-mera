@@ -17,10 +17,13 @@ survey list/search/create/open, locale creation, observations within locales,
 draft recovery, offline Dyntaxa taxonomy
 search with free text, reusable species lists with list-first suggestions and a
 default-taxonomy setting, RT90 input and device-position conversion, map filtering,
-Excel and GPX export, JSON backup/restore, and offline editing and permanent deletion of
-surveys, locales, and observations. Data is persisted in SQLite on native
-devices and in origin-scoped browser storage in the web preview. Deletion
-cascades through the hierarchy and requires explicit destructive confirmation.
+Excel and GPX export, JSON backup/restore, offline editing, reversible survey
+archiving, and direct locale/observation deletion in active surveys. Archived
+survey contents are view-only and can only be exported. Permanent survey deletion
+is available only after archiving. Data is persisted in SQLite on native
+devices and in origin-scoped browser storage in the web preview. Archiving
+preserves child records; permanent deletion cascades and requires explicit
+destructive confirmation.
 
 The browser preview shares the core routes and uses localStorage, browser file
 downloads, browser geolocation, and an RT90 coordinate map. It is responsive but
@@ -33,9 +36,8 @@ overview WMTS as a temporary online basemap. Native users keep their own Basic
 Auth credentials in platform secure storage; browser credentials remain only in
 memory until the page reloads. The app falls back to its offline coordinate plot
 without credentials, reception, or service access. Custom taxonomy import,
-managed offline map-package downloads, observation duplication, and reversible
-survey archiving remain post-MVP items described below, not claims about the
-current app.
+managed offline map-package downloads, and observation duplication remain
+post-MVP items described below, not claims about the current app.
 
 Native SQLite and browser localStorage repositories share deterministic policy
 for draft identities, backup normalization, locale inheritance, and species-list
@@ -77,8 +79,8 @@ independent of platform views where practical.
 ### Goals
 
 - List, search, create, open, edit, and archive surveys.
-- Add, edit, and delete locales within a survey.
-- Add, edit, duplicate, and delete observations within a locale.
+- Add, edit, and delete locales in active surveys.
+- Add, edit, duplicate, and delete observations in active surveys.
 - Capture the current time and device position with minimal taps.
 - Enter coordinates manually in RT90 2.5 gon V.
 - Search a downloaded Dyntaxa taxonomy, initially vascular plants
@@ -166,10 +168,17 @@ independent of platform views where practical.
   numeric cells with the whole-number format `0`, so no decimal digits or
   trailing decimal zeroes are displayed. Locally stored coordinate precision
   remains unchanged.
-- The local-only MVP allows permanent survey deletion after explicit
-  confirmation. It deletes the survey, its locales, their observations, and
-  associated drafts in one local operation. Locale deletion similarly cascades
-  to its observations. Reversible archiving remains a later feature.
+- Survey archiving reuses the existing `active | archived` status, so it
+  requires no SQLite schema migration or JSON backup-format change. Archiving
+  is immediate and reversible, requires no confirmation, and leaves the user
+  on the survey screen with an archived warning banner. The main list shows
+  active surveys by default; `Visa arkiverade inventeringar` includes archived
+  and active surveys together. Archived surveys remain viewable and exportable
+  but cannot be edited or receive new locales/observations. Restore returns a
+  survey to the active list. Permanent survey deletion is available only for
+  archived surveys, requires explicit confirmation, and cascades to locales,
+  observations, and associated drafts in one local operation. Locale and
+  observation deletion remains direct only while the survey is active.
 - SQLite schema v2 migrates saved v1 observations by grouping exact locality
   names per survey into locales. The earliest-created observation supplies each
   locale's defaults and differing later values become explicit overrides.
@@ -240,7 +249,7 @@ drafts over dense desktop controls.
 | `/surveys/:surveyId` | Survey detail | Locale list and survey summary |
 | `/surveys/:surveyId/locales/new` | Add locale | Capture locale name, time, coordinate, and note |
 | `/surveys/:surveyId/locales/:localeId` | Locale detail | Observation list and locale summary |
-| `/surveys/:surveyId/locales/:localeId/edit` | Edit locale | Change or delete a locale |
+| `/surveys/:surveyId/locales/:localeId/edit` | Edit locale | Change or delete a locale in an active survey |
 | `/surveys/:surveyId/locales/:localeId/observations/new` | Add observation | Capture observation fields and overrides |
 | `/surveys/:surveyId/map` | Survey map | Filter by locale/species/date and view markers |
 | `/surveys/:surveyId/observations/:observationId` | Observation detail/edit | Review and change an observation |
@@ -274,6 +283,10 @@ the locale twice.
 - Each card shows title, locale and observation counts, survey date, and a chevron.
 - Empty state explains how to create the first survey; no-results state keeps
   the search visible.
+- `Visa arkiverade inventeringar` is off by default. When enabled, active and
+  archived surveys are shown together with the current search and ordering;
+  archived cards are clearly labelled. The floating add button remains
+  available for creating a new active survey.
 - Floating add button opens the create-survey screen and has an accessible
   label, not only a plus icon.
 
@@ -302,19 +315,27 @@ the locale twice.
   amount, and an indication when a time or coordinate configured to follow the
   locale is overridden. Overrides are expected and unmarked when the respective
   locale default is off.
-- The MVP shows edit, export, backup, and permanent deletion as visible actions
-  below the locale list so they remain discoverable on compact phones. A
-  later menu may consolidate these actions when archiving is added.
-- Archive is reversible. Permanent deletion requires a second explicit action
-  and clearly states that all locales and observations will also be deleted.
+- Active surveys show edit and immediate `Arkivera inventering` actions below
+  the locale list; they do not offer permanent deletion.
+- An archived survey shows a warning banner with `Återställ inventering` and
+  `Radera inventering`. Restoring is immediate. Permanent deletion requires
+  explicit confirmation and states that all locales and observations will be
+  deleted.
+- Archived survey contents are read-only: existing observations and locales
+  remain viewable, and map access plus Excel/GPX/JSON exports remain available.
+  Locale and observation deletion is disabled while archived. Survey-level
+  restore and confirmed permanent deletion remain available from the archive
+  banner.
+- In active surveys, locale deletion requires confirmation and cascades to
+  that locale's observations; observation deletion requires confirmation.
 
 ### 5.4 Add/edit locale
 
 Fields are required locale name, local date/time, and RT90 coordinate, with
 optional accuracy and note. Device GPS can populate both canonical WGS84 and
 derived RT90 values. Editing a locale immediately changes its inherited name,
-time, or position on dependent observations. Deleting a locale requires
-confirmation and deletes all observations in it.
+time, or position on dependent observations. In active surveys, deleting a
+locale requires confirmation and deletes all observations in it.
 
 Two independent switches define defaults for future observations: `Use locale
 time` and `Use locale position`. Both are off for a new locale. With time off, a
@@ -1059,7 +1080,11 @@ treat simulator or Expo Go results as release verification.
 
 - Signed Expo development builds install on iOS and Android test devices and
   launch in airplane mode without Metro or a prior online application launch.
-- User can create/open/archive surveys and search the list.
+- User can create/open surveys; the list defaults to active surveys and can
+  optionally include archived surveys. Users can archive and restore surveys;
+  archived survey contents are view-only, with map viewing and export available.
+  Locale/observation deletion is disabled while archived. Permanent survey
+  deletion is available only after archive.
 - User can add/edit/delete locales with name, time, coordinate, and note.
 - User can add/edit/delete observations with current/new or inherited time and
   coordinate according to the locale defaults, free-text species, optional

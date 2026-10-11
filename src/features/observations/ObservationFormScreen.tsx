@@ -89,7 +89,7 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
   const locationRequestSequence = useRef(0);
   const draftSpeciesQuery = draft?.speciesQuery ?? "";
   const draftSelectedTaxon = draft?.selectedTaxon;
-  const draftKey = surveyId && locale && (!editing || observationId)
+  const draftKey = survey?.status === "active" && surveyId && locale && (!editing || observationId)
     ? editing
       ? observationEditDraftKey(surveyId, locale.id, observationId!)
       : observationDraftKey(surveyId, locale.id)
@@ -171,7 +171,7 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
       const key = editing
         ? observationEditDraftKey(surveyId, localeId, observationId!)
         : observationDraftKey(surveyId, localeId);
-      const stored = await loadDraft<ObservationDraft>(key);
+      const stored = survey.status === "active" ? await loadDraft<ObservationDraft>(key) : null;
       const baseDraft = loadedObservation
         ? observationToDraft(loadedObservation)
         : newObservationDraft(loadedLocale);
@@ -189,7 +189,7 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
       } : baseDraft;
       setDraft(nextDraft);
       setDetailsExpanded(false);
-      if (shouldAutomaticallyCapturePosition(loadedLocale, editing, stored != null)) {
+      if (survey.status === "active" && shouldAutomaticallyCapturePosition(loadedLocale, editing, stored != null)) {
         const requestKey = `${surveyId}:${localeId}`;
         if (automaticLocationRequestKey.current !== requestKey) {
           automaticLocationRequestKey.current = requestKey;
@@ -395,6 +395,25 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
     }
   }
 
+  if (survey?.status === "archived" && locale && draft) {
+    return (
+      <Screen>
+        <Stack.Screen options={{ title: editing ? "Observation (arkiverad)" : "Inventering arkiverad" }} />
+        <Card>
+          <Text style={styles.archivedTitle}>Inventeringen är arkiverad</Text>
+          <Text style={styles.readOnlyText}>Innehållet är skrivskyddat. Lokaler och observationer kan bara visas och exporteras.</Text>
+          {observation ? <Text style={styles.readOnlyText}>{observation.species.preferredName ?? observation.species.enteredName}{observation.species.scientificName ? ` · ${observation.species.scientificName}` : ""}</Text> : null}
+          {observation ? <Text style={styles.readOnlyText}>{localDateFromIso(observation.observedAt)} {localTimeFromIso(observation.observedAt)} · {locale.name}</Text> : null}
+          {observation ? <Text style={styles.readOnlyText}>RT90 Nord {Math.round(observation.position.rt90.northing)}, Öst {Math.round(observation.position.rt90.easting)}</Text> : null}
+          {observation?.amount ? <Text style={styles.readOnlyText}>Antal: {observation.amount.value} {observation.amount.unit}</Text> : null}
+          {observation?.publicComment ? <Text style={styles.readOnlyText}>Publik kommentar: {observation.publicComment}</Text> : null}
+          {observation?.additionalObservers.length ? <Text style={styles.readOnlyText}>Med-observatör: {observation.additionalObservers.join(", ")}</Text> : null}
+        </Card>
+        <Button label="Tillbaka till lokalen" variant="ghost" onPress={() => router.back()} />
+      </Screen>
+    );
+  }
+
   if (!draft || !locale || !survey) {
     return (
       <Screen scroll={false} contentContainerStyle={styles.center}>
@@ -536,6 +555,8 @@ function taxonFromObservation(observation: Observation): Taxon | undefined {
 
 const styles = StyleSheet.create({
   center: { alignItems: "center", justifyContent: "center" },
+  archivedTitle: { color: colors.warning, fontSize: 18, fontWeight: "700" },
+  readOnlyText: { color: colors.text, marginTop: spacing.sm, lineHeight: 20 },
   inListCard: { backgroundColor: colors.green100 },
   inListText: { color: colors.green800, fontWeight: "700" },
   addToListSelected: { borderColor: colors.green700, borderWidth: 2, backgroundColor: colors.green100 },

@@ -40,6 +40,8 @@ import {
   observationEditDraftKey,
   observationEditDraftPrefix,
   optionalText,
+  assertSurveyIsActive,
+  assertSurveyIsArchived,
   resolveObservationInput,
   speciesListEntryToTaxon,
   speciesSnapshotMatches,
@@ -552,7 +554,7 @@ export async function speciesListContains(
   return row?.found === 1;
 }
 
-export async function listSurveys(search = ""): Promise<SurveyListItem[]> {
+export async function listSurveys(search = "", includeArchived = false): Promise<SurveyListItem[]> {
   const database = await getDatabase();
   const pattern = `%${search.trim()}%`;
   const rows = await database.getAllAsync<
@@ -563,7 +565,7 @@ export async function listSurveys(search = ""): Promise<SurveyListItem[]> {
        FROM surveys
        LEFT JOIN locales ON locales.survey_id = surveys.id
        LEFT JOIN observations ON observations.locale_id = locales.id
-      WHERE surveys.status = 'active'
+      WHERE (? = 1 OR surveys.status = 'active')
         AND (? = '%%' OR surveys.title LIKE ? COLLATE NOCASE
           OR coalesce(surveys.description, '') LIKE ? COLLATE NOCASE
           OR EXISTS (SELECT 1 FROM locales search_locales
@@ -571,6 +573,7 @@ export async function listSurveys(search = ""): Promise<SurveyListItem[]> {
                 AND search_locales.name LIKE ? COLLATE NOCASE))
       GROUP BY surveys.id
       ORDER BY surveys.updated_at DESC`,
+    includeArchived ? 1 : 0,
     pattern,
     pattern,
     pattern,
@@ -624,7 +627,7 @@ export async function updateSurvey(
 ): Promise<Survey> {
   const database = await getDatabase();
   const existing = await getSurvey(id);
-  if (!existing) throw new Error("Inventeringen kunde inte hittas.");
+  assertSurveyIsActive(existing);
   const taxonomy = findTaxonomy(draft.taxonomyPackageId);
   if (!taxonomy) throw new Error("Taxonomin kunde inte hittas.");
   const speciesList = draft.speciesListId ? await getSpeciesList(draft.speciesListId) : null;
@@ -661,9 +664,35 @@ export async function updateSurvey(
   return updated;
 }
 
+export async function archiveSurvey(id: string): Promise<Survey> {
+  return updateSurveyArchiveStatus(id, "archived");
+}
+
+export async function restoreSurvey(id: string): Promise<Survey> {
+  return updateSurveyArchiveStatus(id, "active");
+}
+
+async function updateSurveyArchiveStatus(id: string, status: Survey["status"]): Promise<Survey> {
+  const database = await getDatabase();
+  const existing = await getSurvey(id);
+  if (!existing) throw new Error("Inventeringen kunde inte hittas.");
+  if (existing.status === status) return existing;
+  const updated = { ...existing, status, updatedAt: new Date().toISOString() };
+  const result = await database.runAsync(
+    "UPDATE surveys SET status = ?, updated_at = ? WHERE id = ?",
+    status,
+    updated.updatedAt,
+    id,
+  );
+  if (result.changes !== 1) throw new Error("Inventeringen kunde inte hittas.");
+  return updated;
+}
+
 export async function deleteSurvey(id: string): Promise<void> {
   const database = await getDatabase();
   await database.withTransactionAsync(async () => {
+    const row = await database.getFirstAsync<SurveyRow>("SELECT * FROM surveys WHERE id = ?", id);
+    assertSurveyIsArchived(row ? surveyFromRow(row) : null);
     const result = await database.runAsync("DELETE FROM surveys WHERE id = ?", id);
     if (result.changes !== 1) throw new Error("Inventeringen kunde inte hittas.");
     await database.runAsync(
@@ -707,7 +736,7 @@ export async function getLocale(
 
 export async function createLocale(input: LocaleInput): Promise<SurveyLocale> {
   const database = await getDatabase();
-  if (!(await getSurvey(input.surveyId))) throw new Error("Inventeringen kunde inte hittas.");
+  assertSurveyIsActive(await getSurvey(input.surveyId));
   const now = new Date().toISOString();
   const locale: SurveyLocale = {
     ...input,
@@ -729,6 +758,7 @@ export async function updateLocale(localeId: string, input: LocaleInput): Promis
   const database = await getDatabase();
   const existing = await getLocale(input.surveyId, localeId);
   if (!existing) throw new Error("Lokalen kunde inte hittas.");
+  assertSurveyIsActive(await getSurvey(input.surveyId));
   const updated: SurveyLocale = {
     ...input,
     name: input.name.trim(),
@@ -757,6 +787,7 @@ export async function deleteLocale(surveyId: string, localeId: string): Promise<
   const database = await getDatabase();
   const now = new Date().toISOString();
   await database.withTransactionAsync(async () => {
+    assertSurveyIsActive(await getSurvey(surveyId));
     const result = await database.runAsync(
       "DELETE FROM locales WHERE survey_id = ? AND id = ?",
       surveyId,
@@ -836,6 +867,7 @@ export async function createObservation(
   ]);
   if (!locale) throw new Error("Lokalen kunde inte hittas.");
   if (addToSpeciesListId) await assertSurveySpeciesList(input.surveyId, addToSpeciesListId, speciesList);
+  assertSurveyIsActive(await getSurvey(input.surveyId));
   const now = new Date().toISOString();
   const saved: Observation = {
     ...resolveObservationInput(input, locale),
@@ -877,6 +909,7 @@ export async function updateObservation(
   if (!existing) throw new Error("Observationen kunde inte hittas.");
   if (!locale) throw new Error("Lokalen kunde inte hittas.");
   if (addToSpeciesListId) await assertSurveySpeciesList(input.surveyId, addToSpeciesListId, speciesList);
+  assertSurveyIsActive(await getSurvey(input.surveyId));
   const updated: Observation = {
     ...resolveObservationInput(input, locale),
     id: existing.id,
@@ -920,6 +953,7 @@ export async function deleteObservation(
   if (!existing) throw new Error("Observationen kunde inte hittas.");
   const now = new Date().toISOString();
   await database.withTransactionAsync(async () => {
+    assertSurveyIsActive(await getSurvey(surveyId));
     const result = await database.runAsync(
       `DELETE FROM observations WHERE id = ? AND locale_id IN
         (SELECT id FROM locales WHERE survey_id = ?)`,

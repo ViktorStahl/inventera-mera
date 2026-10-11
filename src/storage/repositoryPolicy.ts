@@ -15,6 +15,24 @@ import { migrateLegacyObservations, type LegacyObservation } from "./migrateLoca
 
 export type ObservationInput = Omit<Observation, "id" | "createdAt" | "updatedAt">;
 
+export function assertSurveyIsActive(
+  survey: Survey | null | undefined,
+): asserts survey is Survey {
+  if (!survey) throw new Error("Inventeringen kunde inte hittas.");
+  if (survey.status !== "active") {
+    throw new Error("Inventeringen är arkiverad. Återställ den innan du gör ändringar.");
+  }
+}
+
+export function assertSurveyIsArchived(
+  survey: Survey | null | undefined,
+): asserts survey is Survey {
+  if (!survey) throw new Error("Inventeringen kunde inte hittas.");
+  if (survey.status !== "archived") {
+    throw new Error("Arkivera inventeringen innan du raderar den.");
+  }
+}
+
 export function surveyEditDraftKey(surveyId: string): string {
   return `survey:edit:${surveyId}`;
 }

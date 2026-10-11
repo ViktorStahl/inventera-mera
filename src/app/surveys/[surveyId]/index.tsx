@@ -6,7 +6,7 @@ import type { LocaleListItem, SpeciesList, Survey } from "@/domain/models";
 import { localDateFromIso, localTimeFromIso } from "@/domain/time";
 import { shareSurveyBackup, shareSurveyExcel, shareSurveyGpx } from "@/export/files";
 import { dismissToSurveyList } from "@/navigation/hierarchy";
-import { buildSurveyBackup, deleteSurvey, getSpeciesList, getSurvey, listLocales } from "@/storage/database";
+import { archiveSurvey, buildSurveyBackup, deleteSurvey, getSpeciesList, getSurvey, listLocales, restoreSurvey } from "@/storage/database";
 import { Button } from "@/ui/Button";
 import { messageOf } from "@/ui/errors";
 import { Card } from "@/ui/Card";
@@ -23,6 +23,7 @@ export default function SurveyDetailScreen() {
   const [speciesList, setSpeciesList] = useState<SpeciesList>();
   const [locales, setLocales] = useState<LocaleListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
   const [exporting, setExporting] = useState<"excel" | "gpx" | "json">();
   const [deleting, setDeleting] = useState(false);
 
@@ -85,8 +86,32 @@ export default function SurveyDetailScreen() {
     }
   }
 
+  async function archiveCurrentSurvey() {
+    if (!surveyId) return;
+    setUpdatingStatus(true);
+    try {
+      setSurvey(await archiveSurvey(surveyId));
+    } catch (error) {
+      Alert.alert("Inventeringen kunde inte arkiveras", messageOf(error));
+    } finally {
+      setUpdatingStatus(false);
+    }
+  }
+
+  async function restoreArchivedSurvey() {
+    if (!surveyId) return;
+    setUpdatingStatus(true);
+    try {
+      setSurvey(await restoreSurvey(surveyId));
+    } catch (error) {
+      Alert.alert("Inventeringen kunde inte återställas", messageOf(error));
+    } finally {
+      setUpdatingStatus(false);
+    }
+  }
+
   async function removeSurvey() {
-    if (!surveyId || !survey) return;
+    if (!surveyId || !survey || survey.status !== "archived") return;
     const observationCount = locales.reduce((sum, locale) => sum + locale.observationCount, 0);
     const confirmed = await confirmDestructive(
       "Radera inventering?",
@@ -115,6 +140,14 @@ export default function SurveyDetailScreen() {
   return (
     <Screen>
       <Stack.Screen options={{ title: survey.title }} />
+      {survey.status === "archived" ? (
+        <Card style={styles.archivedBanner}>
+          <Text style={styles.archivedTitle}>Inventeringen är arkiverad</Text>
+          <Text style={styles.description}>Innehållet är skrivskyddat. Lokaler och observationer kan bara visas och exporteras.</Text>
+          <Button label="Återställ inventering" variant="secondary" loading={updatingStatus} disabled={deleting} onPress={() => void restoreArchivedSurvey()} />
+          <Button label="Radera inventering" variant="danger" loading={deleting} disabled={updatingStatus || Boolean(exporting)} onPress={() => void removeSurvey()} />
+        </Card>
+      ) : null}
       <ConnectionBadge />
       <Card>
         <Text style={styles.surveyTitle}>{survey.title}</Text>
@@ -138,7 +171,7 @@ export default function SurveyDetailScreen() {
       </View>
       <View style={styles.list}>
         {locales.length === 0 ? (
-          <EmptyState title="Inga lokaler" body="Lägg till den första lokalen i inventeringen." />
+          <EmptyState title="Inga lokaler" body={survey.status === "active" ? "Lägg till den första lokalen i inventeringen." : "Inga lokaler i den här inventeringen."} />
         ) : (
           locales.map((locale) => (
             <Card
@@ -166,15 +199,17 @@ export default function SurveyDetailScreen() {
           ))
         )}
       </View>
-      <Button
+      {survey.status === "active" ? (
+        <Button
         label="Lägg till lokal"
         onPress={() => router.push({ pathname: "/surveys/[surveyId]/locales/new", params: { surveyId } })}
-      />
-      <View style={styles.manageSection}>
+        />
+      ) : null}
+      {survey.status === "active" ? <View style={styles.manageSection}>
         <Text style={styles.sectionTitle}>Hantera inventering</Text>
-        <Button label="Redigera inventering" variant="secondary" disabled={deleting} onPress={() => router.push({ pathname: "/surveys/[surveyId]/edit", params: { surveyId } })} />
-        <Button label="Radera inventering" variant="danger" loading={deleting} disabled={Boolean(exporting)} onPress={() => void removeSurvey()} />
-      </View>
+        <Button label="Redigera inventering" variant="secondary" disabled={deleting || updatingStatus} onPress={() => router.push({ pathname: "/surveys/[surveyId]/edit", params: { surveyId } })} />
+        <Button label="Arkivera inventering" variant="secondary" loading={updatingStatus} disabled={deleting || Boolean(exporting)} onPress={() => void archiveCurrentSurvey()} />
+      </View> : null}
       <View style={styles.exportSection}>
         <Text style={styles.sectionTitle}>Export och backup</Text>
         <Button label="Exportera till Excel" variant="secondary" loading={exporting === "excel"} disabled={Boolean(exporting)} onPress={() => void exportExcel()} />
@@ -203,6 +238,8 @@ const styles = StyleSheet.create({
   localeDate: { alignItems: "flex-end" },
   chevron: { color: colors.textMuted, fontSize: 28 },
   sectionTitle: { fontSize: 17, fontWeight: "700", color: colors.text },
+  archivedBanner: { backgroundColor: "#FFF7E2", borderColor: colors.warning, gap: spacing.sm },
+  archivedTitle: { color: colors.warning, fontSize: 17, fontWeight: "700" },
   manageSection: { gap: spacing.sm, marginTop: spacing.md },
   exportSection: { gap: spacing.sm },
 });

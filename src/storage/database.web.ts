@@ -36,6 +36,8 @@ import {
   observationEditDraftKey,
   observationEditDraftPrefix,
   optionalText,
+  assertSurveyIsActive,
+  assertSurveyIsArchived,
   resolveObservationInput,
   speciesListEntryToTaxon,
   speciesSnapshotMatches,
@@ -231,11 +233,11 @@ export async function speciesListContains(
   );
 }
 
-export async function listSurveys(search = ""): Promise<SurveyListItem[]> {
+export async function listSurveys(search = "", includeArchived = false): Promise<SurveyListItem[]> {
   const state = await getDatabase();
   const query = normalize(search);
   return state.surveys
-    .filter((survey) => survey.status === "active")
+    .filter((survey) => includeArchived || survey.status === "active")
     .filter((survey) => {
       if (!query) return true;
       return [
@@ -299,7 +301,7 @@ export async function updateSurvey(
   const state = await getDatabase();
   const index = state.surveys.findIndex((survey) => survey.id === id);
   const existing = state.surveys[index];
-  if (!existing) throw new Error("Inventeringen kunde inte hittas.");
+  assertSurveyIsActive(existing);
   const taxonomy = findTaxonomy(draft.taxonomyPackageId);
   if (!taxonomy) throw new Error("Taxonomin kunde inte hittas.");
   const speciesList = draft.speciesListId
@@ -326,9 +328,8 @@ export async function updateSurvey(
 
 export async function deleteSurvey(id: string): Promise<void> {
   const state = await getDatabase();
-  if (!state.surveys.some((survey) => survey.id === id)) {
-    throw new Error("Inventeringen kunde inte hittas.");
-  }
+  const survey = state.surveys.find((item) => item.id === id);
+  assertSurveyIsArchived(survey);
   const localeIds = new Set(
     state.locales.filter((locale) => locale.surveyId === id).map((locale) => locale.id),
   );
@@ -340,6 +341,26 @@ export async function deleteSurvey(id: string): Promise<void> {
   deleteSurveyDrafts(state, id);
   persist(state);
 }
+export async function archiveSurvey(id: string): Promise<Survey> {
+  return updateSurveyArchiveStatus(id, "archived");
+}
+
+export async function restoreSurvey(id: string): Promise<Survey> {
+  return updateSurveyArchiveStatus(id, "active");
+}
+
+async function updateSurveyArchiveStatus(id: string, status: Survey["status"]): Promise<Survey> {
+  const state = await getDatabase();
+  const index = state.surveys.findIndex((survey) => survey.id === id);
+  const existing = state.surveys[index];
+  if (!existing) throw new Error("Inventeringen kunde inte hittas.");
+  if (existing.status === status) return existing;
+  const updated = { ...existing, status, updatedAt: new Date().toISOString() };
+  state.surveys[index] = updated;
+  persist(state);
+  return updated;
+}
+
 
 export async function listLocales(surveyId: string): Promise<LocaleListItem[]> {
   const state = await getDatabase();
@@ -369,7 +390,7 @@ export async function getLocale(
 export async function createLocale(input: LocaleInput): Promise<SurveyLocale> {
   const state = await getDatabase();
   const survey = state.surveys.find((item) => item.id === input.surveyId);
-  if (!survey) throw new Error("Inventeringen kunde inte hittas.");
+  assertSurveyIsActive(survey);
   const now = new Date().toISOString();
   const locale: SurveyLocale = {
     ...input,
@@ -393,6 +414,7 @@ export async function updateLocale(localeId: string, input: LocaleInput): Promis
   );
   const existing = state.locales[index];
   if (!existing) throw new Error("Lokalen kunde inte hittas.");
+  assertSurveyIsActive(state.surveys.find((item) => item.id === input.surveyId));
   const updated: SurveyLocale = {
     ...input,
     name: input.name.trim(),
@@ -415,6 +437,7 @@ export async function deleteLocale(surveyId: string, localeId: string): Promise<
     (locale) => locale.id === localeId && locale.surveyId === surveyId,
   );
   if (index < 0) throw new Error("Lokalen kunde inte hittas.");
+  assertSurveyIsActive(state.surveys.find((item) => item.id === surveyId));
   state.locales.splice(index, 1);
   state.observations = state.observations.filter(
     (observation) => observation.localeId !== localeId,
@@ -483,6 +506,7 @@ export async function createObservation(
     (item) => item.id === input.localeId && item.surveyId === input.surveyId,
   );
   if (!locale) throw new Error("Lokalen kunde inte hittas.");
+  assertSurveyIsActive(state.surveys.find((item) => item.id === input.surveyId));
   if (addToSpeciesListId) assertSurveySpeciesList(state, input.surveyId, addToSpeciesListId);
   const now = new Date().toISOString();
   const saved: Observation = {
@@ -514,6 +538,7 @@ export async function updateObservation(
     (item) => item.id === input.localeId && item.surveyId === input.surveyId,
   );
   if (!locale) throw new Error("Lokalen kunde inte hittas.");
+  assertSurveyIsActive(state.surveys.find((item) => item.id === input.surveyId));
   if (addToSpeciesListId) assertSurveySpeciesList(state, input.surveyId, addToSpeciesListId);
   const updated: Observation = {
     ...resolveObservationInput(input, locale),
@@ -542,6 +567,7 @@ export async function deleteObservation(
     (item) => item.id === existing.localeId && item.surveyId === surveyId,
   );
   if (!locale) throw new Error("Observationen kunde inte hittas.");
+  assertSurveyIsActive(state.surveys.find((item) => item.id === surveyId));
   state.observations.splice(index, 1);
   const survey = state.surveys.find((item) => item.id === surveyId);
   if (survey) survey.updatedAt = new Date().toISOString();

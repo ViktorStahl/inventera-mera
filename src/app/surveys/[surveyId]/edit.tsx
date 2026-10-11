@@ -1,9 +1,9 @@
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 
 import { VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
-import type { SurveyDraft } from "@/domain/models";
+import type { Survey, SurveyDraft } from "@/domain/models";
 import { hasErrors, validateSurveyDraft, type ValidationErrors } from "@/domain/validation";
 import { SurveyFields } from "@/features/surveys/SurveyFields";
 import { dismissToSurvey } from "@/navigation/hierarchy";
@@ -27,6 +27,7 @@ export default function EditSurveyScreen() {
   const [hydrated, setHydrated] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const [survey, setSurvey] = useState<Survey>();
   useEffect(() => {
     if (!surveyId) return;
     Promise.all([getSurvey(surveyId), loadDraft<Partial<SurveyDraft>>(surveyEditDraftKey(surveyId))])
@@ -40,13 +41,14 @@ export default function EditSurveyScreen() {
             speciesListId: survey.speciesListId ?? "",
           } satisfies SurveyDraft;
         const initial = { ...persisted, ...stored };
+        setSurvey(survey);
         setDraft(initial);
       })
       .catch((error) => Alert.alert("Kunde inte öppna inventeringen", messageOf(error)))
       .finally(() => setHydrated(true));
   }, [surveyId]);
 
-  useDraftAutosave(surveyId ? surveyEditDraftKey(surveyId) : undefined, draft, hydrated);
+  useDraftAutosave(survey?.status === "active" && surveyId ? surveyEditDraftKey(surveyId) : undefined, draft, hydrated);
 
   const canSave = Boolean(draft && hydrated && !saving);
 
@@ -71,6 +73,18 @@ export default function EditSurveyScreen() {
     }
   }
 
+  if (survey?.status === "archived") {
+    return (
+      <Screen>
+        <Stack.Screen options={{ title: "Inventering arkiverad" }} />
+        <View>
+          <Text style={styles.archivedTitle}>Inventeringen är arkiverad</Text>
+          <Text>Återställ inventeringen innan du redigerar den.</Text>
+        </View>
+        <Button label="Tillbaka till inventeringen" variant="ghost" onPress={() => router.back()} />
+      </Screen>
+    );
+  }
   if (!draft) {
     return (
       <Screen scroll={false} contentContainerStyle={styles.center}>
@@ -98,5 +112,6 @@ export default function EditSurveyScreen() {
 
 const styles = StyleSheet.create({
   center: { alignItems: "center", justifyContent: "center" },
+  archivedTitle: { color: colors.warning, fontSize: 18, fontWeight: "700", marginBottom: spacing.sm },
   actions: { gap: spacing.sm },
 });

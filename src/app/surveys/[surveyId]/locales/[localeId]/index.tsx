@@ -66,14 +66,9 @@ export default function LocaleDetailScreen() {
               Nord {Math.round(locale.position.rt90.northing)} · Öst {Math.round(locale.position.rt90.easting)}
             </Text>
           </View>
-          <Button
-            label="Redigera"
-            variant="ghost"
-            onPress={() => router.push({
-              pathname: "/surveys/[surveyId]/locales/[localeId]/edit",
-              params: { surveyId, localeId },
-            })}
-          />
+          {survey.status === "active" ? (
+            <Button label="Redigera" variant="ghost" onPress={() => router.push({ pathname: "/surveys/[surveyId]/locales/[localeId]/edit", params: { surveyId, localeId } })} />
+          ) : null}
         </View>
         {locale.note ? <Text style={styles.note}>{locale.note}</Text> : null}
       </Card>
@@ -94,7 +89,7 @@ export default function LocaleDetailScreen() {
       </View>
       <View style={styles.list}>
         {observations.length === 0 ? (
-          <EmptyState title="Inga observationer" body="Lägg till den första observationen i lokalen." />
+          <EmptyState title="Inga observationer" body={survey.status === "active" ? "Lägg till den första observationen i lokalen." : "Inga observationer i lokalen."} />
         ) : (
           observations.map((observation) => {
             const deviation = localeDeviationLabel(locale, observation);
@@ -105,7 +100,7 @@ export default function LocaleDetailScreen() {
                   pathname: "/surveys/[surveyId]/observations/[observationId]",
                   params: { surveyId, observationId: observation.id },
                 })}
-                accessibilityLabel={`Redigera ${observation.species.preferredName ?? observation.species.enteredName}`}
+                accessibilityLabel={`${survey.status === "active" ? "Redigera" : "Visa"} ${observation.species.preferredName ?? observation.species.enteredName}`}
               >
                 <View style={styles.observationRow}>
                   <Text style={styles.time}>{localTimeFromIso(observation.observedAt)}</Text>
@@ -124,13 +119,13 @@ export default function LocaleDetailScreen() {
           })
         )}
       </View>
-      <Button
+      {survey.status === "active" ? <Button
         label="Lägg till observation"
         onPress={() => router.push({
           pathname: "/surveys/[surveyId]/locales/[localeId]/observations/new",
           params: { surveyId, localeId },
         })}
-      />
+      /> : null}
     </Screen>
   );
 }
