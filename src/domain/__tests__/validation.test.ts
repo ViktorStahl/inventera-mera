@@ -85,8 +85,10 @@ describe("locale validation", () => {
     northing: "6400000",
     easting: "1300000",
     accuracyMeters: "",
-    positionSource: "manual-rt90",
-    note: "",
+      positionSource: "manual-rt90",
+      note: "",
+      useLocaleTimeByDefault: false,
+      useLocalePositionByDefault: false,
   };
 
   it("requires a name and valid RT90 coordinate", () => {

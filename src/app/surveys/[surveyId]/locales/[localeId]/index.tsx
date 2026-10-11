@@ -4,6 +4,7 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "rea
 
 import type { Observation, Survey, SurveyLocale } from "@/domain/models";
 import { localDateFromIso, localTimeFromIso } from "@/domain/time";
+import { localeDeviationLabel } from "@/features/observations/localeDeviation";
 import { getLocale, getSurvey, listLocaleObservations } from "@/storage/database";
 import { Button } from "@/ui/Button";
 import { messageOf } from "@/ui/errors";
@@ -95,29 +96,32 @@ export default function LocaleDetailScreen() {
         {observations.length === 0 ? (
           <EmptyState title="Inga observationer" body="Lägg till den första observationen i lokalen." />
         ) : (
-          observations.map((observation) => (
-            <Card
-              key={observation.id}
-              onPress={() => router.push({
-                pathname: "/surveys/[surveyId]/observations/[observationId]",
-                params: { surveyId, observationId: observation.id },
-              })}
-              accessibilityLabel={`Redigera ${observation.species.preferredName ?? observation.species.enteredName}`}
-            >
-              <View style={styles.observationRow}>
-                <Text style={styles.time}>{localTimeFromIso(observation.observedAt)}</Text>
-                <View style={styles.observationBody}>
-                  <Text style={styles.species}>{observation.species.preferredName ?? observation.species.enteredName}</Text>
-                  {observation.species.scientificName ? <Text style={styles.scientific}>{observation.species.scientificName}</Text> : <Text style={styles.freeText}>Fritext</Text>}
-                  {observation.timeOverridden || observation.positionOverridden ? (
-                    <Text style={styles.override}>Avviker från lokalens {observation.timeOverridden && observation.positionOverridden ? "tid och position" : observation.timeOverridden ? "tid" : "position"}</Text>
-                  ) : null}
+          observations.map((observation) => {
+            const deviation = localeDeviationLabel(locale, observation);
+            return (
+              <Card
+                key={observation.id}
+                onPress={() => router.push({
+                  pathname: "/surveys/[surveyId]/observations/[observationId]",
+                  params: { surveyId, observationId: observation.id },
+                })}
+                accessibilityLabel={`Redigera ${observation.species.preferredName ?? observation.species.enteredName}`}
+              >
+                <View style={styles.observationRow}>
+                  <Text style={styles.time}>{localTimeFromIso(observation.observedAt)}</Text>
+                  <View style={styles.observationBody}>
+                    <Text style={styles.species}>{observation.species.preferredName ?? observation.species.enteredName}</Text>
+                    {observation.species.scientificName ? <Text style={styles.scientific}>{observation.species.scientificName}</Text> : <Text style={styles.freeText}>Fritext</Text>}
+                    {deviation ? (
+                      <Text style={styles.override}>Avviker från lokalens {deviation}</Text>
+                    ) : null}
+                  </View>
+                  <Text style={styles.amount}>{observation.amount ? `${observation.amount.value} ${observation.amount.unit}` : "–"}</Text>
+                  <Text style={styles.chevron}>›</Text>
                 </View>
-                <Text style={styles.amount}>{observation.amount ? `${observation.amount.value} ${observation.amount.unit}` : "–"}</Text>
-                <Text style={styles.chevron}>›</Text>
-              </View>
-            </Card>
-          ))
+              </Card>
+            );
+          })
         )}
       </View>
       <Button

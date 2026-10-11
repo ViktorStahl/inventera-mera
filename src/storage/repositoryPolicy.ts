@@ -148,6 +148,14 @@ export function taxonomyReference(taxonomy: TaxonomyReference): TaxonomyReferenc
   };
 }
 
+function localeWithObservationDefaults(value: SurveyLocale): SurveyLocale {
+  return {
+    ...value,
+    useLocaleTimeByDefault: value.useLocaleTimeByDefault === true,
+    useLocalePositionByDefault: value.useLocalePositionByDefault === true,
+  };
+}
+
 export function normalizeSurveyBackup(
   value: unknown,
   createId: () => string,
@@ -167,11 +175,11 @@ export function normalizeSurveyBackup(
     );
     return {
       format: "inventera-mera-backup",
-      formatVersion: 4,
+      formatVersion: 5,
       exportedAt:
         typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString(),
       survey,
-      locales: migrated.locales,
+      locales: migrated.locales.map(localeWithObservationDefaults),
       observations: migrated.observations,
     };
   }
@@ -182,18 +190,20 @@ export function normalizeSurveyBackup(
   ) {
     return {
       format: "inventera-mera-backup",
-      formatVersion: 4,
+      formatVersion: 5,
       exportedAt:
         typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString(),
       survey,
-      locales: backup.locales as SurveyLocale[],
+      locales: (backup.locales as SurveyLocale[]).map(localeWithObservationDefaults),
       observations: (backup.observations as Observation[]).filter((observation) =>
         isSupportedObservationAmount(observation.amount),
       ),
     };
   }
   if (
-    (backup.formatVersion !== 3 && backup.formatVersion !== 4) ||
+    (backup.formatVersion !== 3 &&
+      backup.formatVersion !== 4 &&
+      backup.formatVersion !== 5) ||
     !Array.isArray(backup.locales) ||
     !Array.isArray(backup.observations)
   ) {
@@ -210,7 +220,12 @@ export function normalizeSurveyBackup(
   ) {
     throw new Error("Backupens artlista är ogiltig.");
   }
-  const normalized = { ...backup, survey, formatVersion: 4 } as unknown as SurveyBackup;
+  const normalized = {
+    ...backup,
+    survey,
+    formatVersion: 5,
+    locales: (backup.locales as SurveyLocale[]).map(localeWithObservationDefaults),
+  } as unknown as SurveyBackup;
   if (normalized.locales.some((locale) => locale.surveyId !== survey.id)) {
     throw new Error("Backupen innehåller lokaler från en annan inventering.");
   }

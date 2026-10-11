@@ -28,6 +28,8 @@ export type SurveyLocale = {
   timeZone: string;
   position: Position;
   note?: string;
+  useLocaleTimeByDefault: boolean;
+  useLocalePositionByDefault: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -126,6 +128,8 @@ export type LocaleDraft = {
   latitude?: number;
   longitude?: number;
   note: string;
+  useLocaleTimeByDefault: boolean;
+  useLocalePositionByDefault: boolean;
 };
 
 export type ObservationDraft = {
@@ -150,7 +154,7 @@ export type ObservationDraft = {
 
 export type SurveyBackup = {
   format: "inventera-mera-backup";
-  formatVersion: 4;
+  formatVersion: 5;
   exportedAt: string;
   survey: Survey;
   locales: SurveyLocale[];

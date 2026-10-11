@@ -33,6 +33,8 @@ export function migrateLegacyObservations(
       observedAt: first.observedAt,
       timeZone: first.timeZone,
       position: first.position,
+      useLocaleTimeByDefault: false,
+      useLocalePositionByDefault: false,
       createdAt: first.createdAt,
       updatedAt: group.reduce(
         (latest, item) => (item.updatedAt > latest ? item.updatedAt : latest),

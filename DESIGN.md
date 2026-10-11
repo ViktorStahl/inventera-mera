@@ -1,7 +1,7 @@
 # Inventera mera — product and technical design
 
 Status: MVP implemented; remaining sections describe the production-capable target  
-Last updated: 2026-08-15
+Last updated: 2026-10-11
 
 Platform decision: React Native with Expo for iOS and Android, plus an Expo Web
 browser preview. Native remains the field-production target.
@@ -146,9 +146,12 @@ independent of platform views where practical.
   name, time, and coordinate plus an optional note.
 - `Lokalnamn` is the locale's current name. Observations refer to a locale and
   cannot rename it independently.
-- An observation uses its locale's time and coordinate by default. The user can
-  override either value independently or return it to live inheritance. Editing
-  an inherited locale value therefore updates all non-overridden observations.
+- A new observation uses the current time and automatically captures a new
+  device position by default. Each locale has independent settings that can
+  instead make new observations use the locale's time and/or position. The user
+  can switch either value independently between an observation-specific value
+  and live locale inheritance. Editing an inherited locale value therefore
+  updates all non-overridden observations.
 - Observation entry keeps the primary task near the top: species and amount
   precede a single inline accordion for time and position. Its compact header
   says whether those values follow the locale or are specific to the
@@ -180,6 +183,11 @@ independent of platform views where practical.
   form drafts from the earlier shape. Existing surveys, locales, observations,
   taxonomy selections, and species-list relations are preserved. Browser data
   and restored backup versions 1–3 likewise discard obsolete survey region data.
+- SQLite schema v5 adds the locale-level defaults for new-observation time and
+  position. Both are false for new and existing locales unless the user enables
+  them; existing observations and drafts retain their explicit inheritance or
+  override state. JSON backup format v5 persists both settings and restores
+  older backups with both settings disabled.
 
 ## 3. Primary user and core journeys
 
@@ -201,9 +209,12 @@ drafts over dense desktop controls.
 ### 3.2 Create a locale and record an observation
 
 1. Open a survey, add a locale, and enter its name, time, and coordinate.
-2. Open the locale and add an observation. Its time and coordinate initially
-   follow the locale.
-3. If needed, override time and/or coordinate. Tap `My location`; the app obtains WGS84 device coordinates, shows the
+2. Open the locale and add an observation. It initially uses the current time
+   and automatically requests a new device position, unless that locale is
+   configured to supply its time and/or position.
+3. If automatic capture fails, tap `My location` to retry or enter RT90
+   manually. If needed, switch either value to or from locale inheritance.
+   Device capture obtains WGS84 coordinates, shows the
    reported accuracy, and transforms them locally to RT90.
 4. Search downloaded species names, select a suggestion, or add the typed name
    as free text.
@@ -288,7 +299,9 @@ the locale twice.
   readers and preserve scroll/viewport state when switching.
 - Each locale row shows name, date/time, and observation count. Opening a locale
   shows its observations with time, preferred/common name, scientific name,
-  amount, and an indication when time or coordinate overrides the locale.
+  amount, and an indication when a time or coordinate configured to follow the
+  locale is overridden. Overrides are expected and unmarked when the respective
+  locale default is off.
 - The MVP shows edit, export, backup, and permanent deletion as visible actions
   below the locale list so they remain discoverable on compact phones. A
   later menu may consolidate these actions when archiving is added.
@@ -302,6 +315,14 @@ optional accuracy and note. Device GPS can populate both canonical WGS84 and
 derived RT90 values. Editing a locale immediately changes its inherited name,
 time, or position on dependent observations. Deleting a locale requires
 confirmation and deletes all observations in it.
+
+Two independent switches define defaults for future observations: `Use locale
+time` and `Use locale position`. Both are off for a new locale. With time off, a
+new observation starts at the current local time. With position off, it opens
+the details section and automatically requests a fresh device position. If that
+fails, the user can retry or enter RT90 manually. Enabling a switch creates new
+observations with live inheritance for that value. Changing a switch never
+rewrites existing observations or restored observation drafts.
 
 ### 5.5 Add/edit observation
 
@@ -319,23 +340,30 @@ The primary form order is:
    time/position follow it or are specific to the observation. Expanding it
    reveals local date/time, RT90 Northing/Easting, optional accuracy, and their
    quick actions immediately below the header inside the same bordered box.
-   Date/time and coordinates are required and live-inherited unless independently
-   overridden. Accuracy is read-only when supplied by device GPS.
+   Date/time and coordinates are required. Values can either be
+   observation-specific or live-inherited independently. Accuracy is read-only
+   when supplied by device GPS.
 5. Public comment (`Publik kommentar`), optional multiline plain text. Make its
    exported/public character clear in the label.
 6. Additional observers (`Med-observatör`), optional repeatable names. Trim
    names, preserve spelling and ordering, and prevent empty entries.
 
-The inherited-details section is collapsed for a new or edited observation
-whose time and position both follow its locale. It starts expanded for an
-existing or restored draft with either override, expands automatically when a
-contained field fails validation, and retains its open/closed state during the
-current form session. The accordion header remains directly adjacent to the
-fields it reveals, so expansion never inserts controls elsewhere in the form.
+The inherited-details section starts collapsed for new, edited, and restored
+observations regardless of whether values are inherited or overridden. Its
+header continues to show location progress and inheritance state. It expands
+automatically when automatic location capture fails or a contained field fails
+validation, and retains its open/closed state during the current form session.
+The accordion header remains directly adjacent to the fields it reveals, so
+expansion never inserts controls elsewhere in the form.
 
-Defaulting runs only when creating a genuinely new blank form. A restored v2
-draft always wins. `Use locale time` and `Use locale position` clear their
-respective override instead of copying a new snapshot.
+Defaulting runs only when creating a genuinely new blank form. The current time
+is captured once during form creation. If locale-position inheritance is off,
+the form requests foreground location once and fills the coordinate and reported
+accuracy automatically; denial or failure leaves manual entry and the retry
+action available. Locale settings may replace either default with live
+inheritance. A restored v2 draft always wins. `Use locale time` and `Use
+locale position` clear their respective override instead of copying a new
+snapshot.
 
 Quick actions set the current time, restore locale time/position, or acquire
 the current location. Location capture must show `locating`, `success with
@@ -460,6 +488,8 @@ type SurveyLocale = {
   timeZone: string;
   position: Position;
   note?: string;
+  useLocaleTimeByDefault: boolean;
+  useLocalePositionByDefault: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -689,8 +719,9 @@ package metadata.
   useful only for modules it contains and is not the application runtime.
 - `expo-sqlite` with WAL mode, foreign keys, explicit migrations, prepared
   statements, and FTS5 for taxonomy search.
-- `expo-location` for foreground, user-initiated position capture. Background
-  location is not requested for the first release.
+- `expo-location` for foreground position capture, initiated automatically when
+  a fresh observation needs its own position and manually for retries.
+  Background location is not requested for the first release.
 - `expo-file-system` for downloaded packages, backups, and generated exports.
 - `expo-sharing` and the platform share sheet for `.xlsx` and backup files.
 - MapLibre React Native/MapLibre Native for maps and managed offline regions.
@@ -764,11 +795,13 @@ user confirmation before removing downloaded data.
 - The schema v3 → v4 migration preserves surveys and their child records while
   removing the seven obsolete survey-region columns. Survey create/edit drafts
   are discarded because their saved shape contains those removed fields.
-- JSON backup format v4 includes the survey's currently selected species list
+- JSON backup format v5 includes locale observation-default settings, the
+  survey's currently selected species list,
   and all of its entries. Restore validates the relation and taxonomy. If the
   same shared list already exists locally, restore merges missing entries
-  without deleting newer local entries. Restoring formats v1–v3 is supported,
-  but any legacy survey-region object is deliberately discarded.
+  without deleting newer local entries. Restoring formats v1–v4 is supported;
+  missing locale defaults become false, and any legacy survey-region object is
+  deliberately discarded.
 - The fixed amount-unit decision does not add a SQLite schema migration. On
   startup, native and browser repositories permanently delete observations
   whose amount is negative, partial, or uses another unit, and discard
@@ -924,8 +957,9 @@ backups.
 
 - Surveys and exact coordinates can be sensitive. Keep them local by default,
   make export an explicit action, and explain where data is stored.
-- Request geolocation only after a user taps `My location`; explain denial and
-  allow manual entry.
+- Request foreground geolocation once when a fresh observation needs its own
+  position, or after the user taps `My location` to retry; explain denial and
+  allow manual entry. Never request background location.
 - No analytics, error-report payloads, or logs may contain exact coordinates,
   notes, survey titles, or species names without a separate consent/privacy
   design.
@@ -972,8 +1006,9 @@ backups.
 - Coordinate control points, bounds, axis order, and round trips.
 - Dyntaxa subtree/rank selection, package manifest consistency, taxonomy
   normalization/ranking, and CSV import validation.
-- Species-list identity, list-first ranking, shared-list deletion, schema v3/v4
-  migrations (including region removal), and backup merge behaviour.
+- Species-list identity, list-first ranking, shared-list deletion, schema
+  v3/v4/v5 migrations (including region removal and locale observation
+  defaults), and backup merge behaviour.
 - File-name/cell sanitization, workbook column mapping, and GPS-accuracy class
   boundaries.
 - Date/time-zone and daylight-saving boundaries.
@@ -982,7 +1017,7 @@ backups.
 
 - All form states, draft restoration, error focus, and free-text path.
 - Observation-details accordion adjacency, collapse/expand state,
-  override/error auto-expansion, status wording, and keyboard-sticky save action.
+  GPS-failure/error auto-expansion, status wording, and keyboard-sticky save action.
 - Species keyboard/touch selection and accessible announcements.
 - Online/offline/storage indicators.
 - Map fallback without a basemap.
@@ -1013,9 +1048,9 @@ treat simulator or Expo Go results as release verification.
   launch in airplane mode without Metro or a prior online application launch.
 - User can create/open/archive surveys and search the list.
 - User can add/edit/delete locales with name, time, coordinate, and note.
-- User can add/edit/delete observations with inherited or overridden time and
-  coordinate, free-text species, optional amount/unit, public comment,
-  additional observers, and v2 draft recovery.
+- User can add/edit/delete observations with current/new or inherited time and
+  coordinate according to the locale defaults, free-text species, optional
+  amount/unit, public comment, additional observers, and v2 draft recovery.
 - Records survive process termination and application restart.
 
 ### Phase 2 — location and taxonomy

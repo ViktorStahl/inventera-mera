@@ -1,7 +1,7 @@
 import * as Location from "expo-location";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Switch, Text, View } from "react-native";
 
 import { rt90ToWgs84, wgs84ToRt90 } from "@/domain/coordinates";
 import type { LocaleDraft, SurveyLocale } from "@/domain/models";
@@ -43,6 +43,8 @@ function emptyDraft(): LocaleDraft {
     accuracyMeters: "",
     positionSource: "manual-rt90",
     note: "",
+    useLocaleTimeByDefault: false,
+    useLocalePositionByDefault: false,
   };
 }
 
@@ -76,7 +78,15 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
         if (!survey) throw new Error("Inventeringen kunde inte hittas.");
         if (editing && !loadedLocale) throw new Error("Lokalen kunde inte hittas.");
         if (loadedLocale) setLocale(loadedLocale);
-        setDraft(stored ?? (loadedLocale ? localeToDraft(loadedLocale) : emptyDraft()));
+        const baseDraft = loadedLocale ? localeToDraft(loadedLocale) : emptyDraft();
+        setDraft(stored ? {
+          ...baseDraft,
+          ...stored,
+          useLocaleTimeByDefault:
+            stored.useLocaleTimeByDefault ?? baseDraft.useLocaleTimeByDefault,
+          useLocalePositionByDefault:
+            stored.useLocalePositionByDefault ?? baseDraft.useLocalePositionByDefault,
+        } : baseDraft);
       })
       .catch((error) => Alert.alert("Kunde inte öppna lokalen", messageOf(error)))
       .finally(() => setHydrated(true));
@@ -183,6 +193,8 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
           source: draft.positionSource,
         },
         note: draft.note.trim() || undefined,
+        useLocaleTimeByDefault: draft.useLocaleTimeByDefault,
+        useLocalePositionByDefault: draft.useLocalePositionByDefault,
       };
       const saved = editing && localeId
         ? await updateLocale(localeId, input)
@@ -302,6 +314,24 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
         onChangeText={(value) => update("note", value)}
         multiline
       />
+      <View style={styles.defaultsSection}>
+        <Text style={styles.defaultsTitle}>Standard för nya observationer</Text>
+        <Text style={styles.sectionHint}>
+          Avstängda val ger aktuell tid och hämtar en ny position för varje observation.
+        </Text>
+        <LocaleDefaultSwitch
+          label="Använd lokalens tid"
+          hint="Nya observationer följer lokalens tid tills tiden ändras."
+          value={draft.useLocaleTimeByDefault}
+          onValueChange={(value) => update("useLocaleTimeByDefault", value)}
+        />
+        <LocaleDefaultSwitch
+          label="Använd lokalens position"
+          hint="Nya observationer följer lokalens position tills positionen ändras."
+          value={draft.useLocalePositionByDefault}
+          onValueChange={(value) => update("useLocalePositionByDefault", value)}
+        />
+      </View>
       <View style={styles.actions}>
         <Button
           label={editing ? "Spara ändringar" : "Spara lokal"}
@@ -336,7 +366,37 @@ function localeToDraft(locale: SurveyLocale): LocaleDraft {
     latitude: locale.position.wgs84.latitude,
     longitude: locale.position.wgs84.longitude,
     note: locale.note ?? "",
+    useLocaleTimeByDefault: locale.useLocaleTimeByDefault,
+    useLocalePositionByDefault: locale.useLocalePositionByDefault,
   };
+}
+
+function LocaleDefaultSwitch({
+  label,
+  hint,
+  value,
+  onValueChange,
+}: {
+  label: string;
+  hint: string;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+}) {
+  return (
+    <View style={styles.settingRow}>
+      <View style={styles.settingText}>
+        <Text style={styles.settingLabel}>{label}</Text>
+        <Text style={styles.sectionHint}>{hint}</Text>
+      </View>
+      <Switch
+        accessibilityLabel={label}
+        value={value}
+        onValueChange={onValueChange}
+        trackColor={{ false: colors.border, true: colors.green700 }}
+        thumbColor={colors.surface}
+      />
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
@@ -344,5 +404,21 @@ const styles = StyleSheet.create({
   twoColumns: { flexDirection: "row", gap: spacing.md, alignItems: "flex-start" },
   column: { flex: 1 },
   sectionTitle: { color: colors.text, fontSize: 16, fontWeight: "700", marginBottom: -spacing.sm },
+  defaultsTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
+  sectionHint: { color: colors.textMuted, fontSize: 13 },
+  defaultsSection: { gap: spacing.md },
+  settingRow: {
+    minHeight: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+  },
+  settingText: { flex: 1, gap: spacing.xs },
+  settingLabel: { color: colors.text, fontWeight: "700" },
   actions: { gap: spacing.sm, marginTop: spacing.sm },
 });

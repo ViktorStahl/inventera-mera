@@ -30,7 +30,11 @@ describe("v1 locale migration", () => {
     ], () => `locale-${++next}`);
 
     expect(migrated.locales).toHaveLength(2);
-    expect(migrated.locales[0]?.observedAt).toContain("10:10");
+    expect(migrated.locales[0]).toMatchObject({
+      observedAt: expect.stringContaining("10:10"),
+      useLocaleTimeByDefault: false,
+      useLocalePositionByDefault: false,
+    });
     expect(migrated.observations.find((item) => item.id === "first")).toMatchObject({ timeOverridden: false, positionOverridden: false });
     expect(migrated.observations.find((item) => item.id === "second")).toMatchObject({ timeOverridden: true, positionOverridden: true });
   });

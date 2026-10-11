@@ -58,7 +58,7 @@ export {
 } from "./repositoryPolicy";
 
 const DATABASE_NAME = "inventera-mera.db";
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const TAXONOMY_DATABASE_NAME = `dyntaxa-vascular-plants-${taxonomyManifest.version}.db`;
 const TAXONOMY_DATABASE_ASSET = require(
   "../../assets/taxonomies/dyntaxa-vascular-plants.db",
@@ -88,6 +88,7 @@ async function openAndMigrate(): Promise<SQLite.SQLiteDatabase> {
   if (version < 2) await migrateToVersionTwo(database);
   if (version < 3) await migrateToVersionThree(database);
   if (version < 4) await migrateToVersionFour(database);
+  if (version < 5) await migrateToVersionFive(database);
   await deleteUnsupportedAmountData(database);
   return database;
 }
@@ -368,6 +369,18 @@ async function migrateToVersionFour(database: SQLite.SQLiteDatabase): Promise<vo
       ALTER TABLE surveys DROP COLUMN region_source_version;
       DELETE FROM drafts WHERE key = 'survey:new' OR key LIKE 'survey:edit:%';
       PRAGMA user_version = 4;
+    `);
+  });
+}
+
+async function migrateToVersionFive(database: SQLite.SQLiteDatabase): Promise<void> {
+  await database.withTransactionAsync(async () => {
+    await database.execAsync(`
+      ALTER TABLE locales ADD COLUMN use_locale_time_by_default INTEGER NOT NULL DEFAULT 0
+        CHECK(use_locale_time_by_default IN (0, 1));
+      ALTER TABLE locales ADD COLUMN use_locale_position_by_default INTEGER NOT NULL DEFAULT 0
+        CHECK(use_locale_position_by_default IN (0, 1));
+      PRAGMA user_version = 5;
     `);
   });
 }
@@ -1016,7 +1029,7 @@ export async function buildSurveyBackup(surveyId: string): Promise<SurveyBackup>
     : null;
   return {
     format: "inventera-mera-backup",
-    formatVersion: 4,
+    formatVersion: 5,
     exportedAt: new Date().toISOString(),
     survey,
     locales: (await listLocales(surveyId)).map(({ observationCount: _, ...locale }) => locale),
@@ -1164,8 +1177,9 @@ async function insertLocale(
     `INSERT INTO locales (
       id, survey_id, name, observed_at, time_zone, latitude, longitude,
       rt90_northing, rt90_easting, accuracy_meters, position_source, note,
+      use_locale_time_by_default, use_locale_position_by_default,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     locale.id,
     locale.surveyId,
     locale.name,
@@ -1178,6 +1192,8 @@ async function insertLocale(
     locale.position.accuracyMeters ?? null,
     locale.position.source,
     locale.note ?? null,
+    locale.useLocaleTimeByDefault ? 1 : 0,
+    locale.useLocalePositionByDefault ? 1 : 0,
     locale.createdAt,
     locale.updatedAt,
   );
@@ -1190,7 +1206,8 @@ async function updateLocaleRow(
   return database.runAsync(
     `UPDATE locales SET name = ?, observed_at = ?, time_zone = ?, latitude = ?,
       longitude = ?, rt90_northing = ?, rt90_easting = ?, accuracy_meters = ?,
-      position_source = ?, note = ?, updated_at = ?
+      position_source = ?, note = ?, use_locale_time_by_default = ?,
+      use_locale_position_by_default = ?, updated_at = ?
      WHERE id = ? AND survey_id = ?`,
     locale.name,
     locale.observedAt,
@@ -1202,6 +1219,8 @@ async function updateLocaleRow(
     locale.position.accuracyMeters ?? null,
     locale.position.source,
     locale.note ?? null,
+    locale.useLocaleTimeByDefault ? 1 : 0,
+    locale.useLocalePositionByDefault ? 1 : 0,
     locale.updatedAt,
     locale.id,
     locale.surveyId,
@@ -1322,6 +1341,8 @@ function localeFromRow(row: LocaleRow): SurveyLocale {
       row.position_source,
     ),
     note: row.note ?? undefined,
+    useLocaleTimeByDefault: row.use_locale_time_by_default === 1,
+    useLocalePositionByDefault: row.use_locale_position_by_default === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -1470,6 +1491,8 @@ type LocaleRow = {
   accuracy_meters: number | null;
   position_source: Position["source"];
   note: string | null;
+  use_locale_time_by_default: number;
+  use_locale_position_by_default: number;
   created_at: string;
   updated_at: string;
 };

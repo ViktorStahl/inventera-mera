@@ -43,9 +43,11 @@ behaviour, architecture, and acceptance criteria.
   uses startup cleanup rather than a new schema migration, as documented in
   `DESIGN.md`.
 - Preserve the Survey → Locale → Observation hierarchy. `Lokalnamn` is the
-  required owning locale's current name. Observations live-inherit locale time
-  and position unless the respective value is explicitly overridden; never
-  overwrite a restored v2 draft or an explicit override.
+  required owning locale's current name. New observations default to current
+  time and a new position; each locale may independently default future
+  observations to live-inherit its time and/or position. Never rewrite existing
+  observations or overwrite a restored v2 draft or explicit override when a
+  locale default changes.
 - Do not put Dyntaxa subscription credentials in the mobile client. Generate
   downloadable taxonomy packages outside the client.
 - Rebuild the bundled Dyntaxa package with `npm run taxonomy:build`; do not edit

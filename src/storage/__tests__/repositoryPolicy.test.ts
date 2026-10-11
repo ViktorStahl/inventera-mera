@@ -2,6 +2,7 @@ import type { Observation, SpeciesList, SurveyLocale } from "@/domain/models";
 import {
   localeDraftKey,
   localeEditDraftKey,
+  normalizeSurveyBackup,
   normalizeSpeciesForList,
   observationDraftKey,
   observationEditDraftKey,
@@ -22,6 +23,8 @@ const locale: SurveyLocale = {
     rt90: { northing: 6_400_000, easting: 1_300_000, crs: "EPSG:3847" },
     source: "manual-rt90",
   },
+  useLocaleTimeByDefault: false,
+  useLocalePositionByDefault: false,
   createdAt: "2026-08-15T07:00:00.000Z",
   updatedAt: "2026-08-15T07:00:00.000Z",
 };
@@ -70,6 +73,33 @@ describe("shared repository policy", () => {
     const resolved = resolveObservationInput(input, locale);
     expect(resolved.observedAt).toBe(input.observedAt);
     expect(resolved.position).toBe(input.position);
+  });
+
+  it("defaults missing locale settings when restoring a version 4 backup", () => {
+    const legacyLocale = { ...locale } as Partial<SurveyLocale>;
+    delete legacyLocale.useLocaleTimeByDefault;
+    delete legacyLocale.useLocalePositionByDefault;
+    const backup = normalizeSurveyBackup({
+      format: "inventera-mera-backup",
+      formatVersion: 4,
+      exportedAt: "2026-10-11T12:00:00.000Z",
+      survey: {
+        id: "survey-1",
+        title: "Inventering",
+        surveyDate: "2026-10-11",
+        status: "active",
+        createdAt: "2026-10-11T12:00:00.000Z",
+        updatedAt: "2026-10-11T12:00:00.000Z",
+      },
+      locales: [legacyLocale],
+      observations: [],
+    }, () => "unused");
+
+    expect(backup.formatVersion).toBe(5);
+    expect(backup.locales[0]).toMatchObject({
+      useLocaleTimeByDefault: false,
+      useLocalePositionByDefault: false,
+    });
   });
 
   it("normalizes taxonomy species to the list taxonomy", () => {

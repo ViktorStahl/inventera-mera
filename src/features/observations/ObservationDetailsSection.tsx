@@ -42,7 +42,11 @@ export function ObservationDetailsAccordion({
   onCaptureLocation,
   onUseLocalePosition,
 }: Props) {
-  const status = inheritanceStatus(draft);
+  const status = locating && positionIsMissing(draft)
+    ? draft.timeOverridden
+      ? "Specifik tid · hämtar ny position…"
+      : "Tid följer lokalen · hämtar ny position…"
+    : inheritanceStatus(draft);
   return (
     <Card style={observationDetailsHaveErrors(errors) ? styles.errorCard : undefined}>
       <Pressable
@@ -154,10 +158,6 @@ export function ObservationDetailsAccordion({
   );
 }
 
-export function observationDetailsInitiallyExpanded(draft: ObservationDraft): boolean {
-  return draft.timeOverridden || draft.positionOverridden;
-}
-
 export function observationDetailsHaveErrors(
   errors: ValidationErrors<ObservationDraft>,
 ): boolean {
@@ -171,12 +171,21 @@ export function observationDetailsHaveErrors(
 }
 
 export function inheritanceStatus(draft: ObservationDraft): string {
+  if (positionIsMissing(draft)) {
+    return draft.timeOverridden
+      ? "Specifik tid · ny position krävs"
+      : "Tid följer lokalen · ny position krävs";
+  }
   if (draft.timeOverridden && draft.positionOverridden) {
     return "Tid och position specifika för observationen";
   }
   if (draft.timeOverridden) return "Tid specifik för observationen · position följer lokalen";
   if (draft.positionOverridden) return "Tid följer lokalen · position specifik för observationen";
   return "Tid och position följer lokalen";
+}
+
+function positionIsMissing(draft: ObservationDraft): boolean {
+  return draft.positionOverridden && (!draft.northing.trim() || !draft.easting.trim());
 }
 
 const styles = StyleSheet.create({

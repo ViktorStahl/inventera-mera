@@ -36,7 +36,20 @@ describe("browser storage", () => {
         createdAt: "2026-07-30T08:00:00.000Z",
         updatedAt: "2026-07-30T08:00:00.000Z",
       }],
-      locales: [],
+      locales: [{
+        id: "legacy-locale",
+        surveyId: "legacy-survey",
+        name: "Äldre lokal",
+        observedAt: "2026-07-30T09:00:00+02:00",
+        timeZone: "Europe/Stockholm",
+        position: {
+          wgs84: { latitude: 57.7, longitude: 11.9 },
+          rt90: { northing: 6400000, easting: 1300000, crs: "EPSG:3847" },
+          source: "manual-rt90",
+        },
+        createdAt: "2026-07-30T07:00:00.000Z",
+        updatedAt: "2026-07-30T07:00:00.000Z",
+      }],
       observations: [{ id: "ogiltig", amount: { value: 1, unit: "individer" } }],
       speciesLists: [],
       speciesListEntries: [],
@@ -48,8 +61,12 @@ describe("browser storage", () => {
     }));
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
     const migratedDatabase = await repository.getDatabase();
-    expect(migratedDatabase.schemaVersion).toBe(4);
+    expect(migratedDatabase.schemaVersion).toBe(5);
     expect(migratedDatabase.surveys[0]).not.toHaveProperty("region");
+    expect(migratedDatabase.locales[0]).toMatchObject({
+      useLocaleTimeByDefault: false,
+      useLocalePositionByDefault: false,
+    });
     expect(migratedDatabase.observations).toEqual([]);
     expect(await repository.loadDraft("survey:new")).toBeNull();
     await repository.deleteSurvey("legacy-survey");
@@ -108,6 +125,8 @@ describe("browser storage", () => {
         source: "device",
       },
       note: "Vid stigen",
+      useLocaleTimeByDefault: false,
+      useLocalePositionByDefault: false,
     };
     await repository.saveDraft(repository.localeDraftKey(survey.id), { name: "utkast" });
     const locale = await repository.createLocale(localeInput);
@@ -182,7 +201,7 @@ describe("browser storage", () => {
 
     const backup = await repository.buildSurveyBackup(survey.id);
     expect(backup).toMatchObject({
-      formatVersion: 4,
+      formatVersion: 5,
       locales: [{ id: locale.id }],
       speciesList: { list: { id: speciesList.id }, entries: expect.any(Array) },
     });

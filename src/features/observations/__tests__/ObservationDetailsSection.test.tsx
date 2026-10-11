@@ -6,7 +6,6 @@ import {
   ObservationDetailsAccordion,
   inheritanceStatus,
   observationDetailsHaveErrors,
-  observationDetailsInitiallyExpanded,
 } from "../ObservationDetailsSection";
 
 const inheritedDraft: ObservationDraft = {
@@ -30,7 +29,13 @@ const inheritedDraft: ObservationDraft = {
 
 const noOp = () => undefined;
 
-function Harness({ draft = inheritedDraft }: { draft?: ObservationDraft }) {
+function Harness({
+  draft = inheritedDraft,
+  locating = false,
+}: {
+  draft?: ObservationDraft;
+  locating?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   return (
     <ObservationDetailsAccordion
@@ -38,7 +43,7 @@ function Harness({ draft = inheritedDraft }: { draft?: ObservationDraft }) {
       draft={draft}
       errors={{}}
       expanded={expanded}
-      locating={false}
+      locating={locating}
       onToggle={() => setExpanded((current) => !current)}
       onDateChange={noOp}
       onTimeChange={noOp}
@@ -76,12 +81,9 @@ describe("observation inherited details", () => {
     ).toEqual({ expanded: true });
   });
 
-  it("opens overridden observations and context validation errors automatically", () => {
-    expect(observationDetailsInitiallyExpanded(inheritedDraft)).toBe(false);
-    expect(observationDetailsInitiallyExpanded({
-      ...inheritedDraft,
-      positionOverridden: true,
-    })).toBe(true);
+  it("keeps overridden details collapsed until opened and identifies context validation errors", () => {
+    const view = render(<Harness draft={{ ...inheritedDraft, positionOverridden: true }} />);
+    expect(view.queryByLabelText("Datum")).toBeNull();
     expect(observationDetailsHaveErrors({ speciesQuery: "Ange artnamn." })).toBe(false);
     expect(observationDetailsHaveErrors({ northing: "Ogiltig koordinat." })).toBe(true);
     expect(inheritanceStatus({
@@ -89,5 +91,29 @@ describe("observation inherited details", () => {
       timeOverridden: true,
       positionOverridden: true,
     })).toBe("Tid och position specifika för observationen");
+    expect(inheritanceStatus({
+      ...inheritedDraft,
+      timeOverridden: true,
+      positionOverridden: true,
+      northing: "",
+      easting: "",
+    })).toBe("Specifik tid · ny position krävs");
+  });
+
+  it("shows that a missing position is being captured automatically", () => {
+    const view = render(
+      <Harness
+        draft={{
+          ...inheritedDraft,
+          timeOverridden: true,
+          positionOverridden: true,
+          northing: "",
+          easting: "",
+        }}
+        locating
+      />,
+    );
+
+    expect(view.getByText("Specifik tid · hämtar ny position…")).toBeTruthy();
   });
 });

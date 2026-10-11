@@ -55,7 +55,7 @@ export {
 } from "./repositoryPolicy";
 
 const STORAGE_KEY = "inventera-mera:web:v1";
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 type PackagedTaxon = [
   id: string,
@@ -69,7 +69,7 @@ type PackagedTaxon = [
 const PACKAGED_TAXA = packagedTaxonomy.taxa as PackagedTaxon[];
 
 type BrowserDatabase = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   surveys: Survey[];
   locales: SurveyLocale[];
   observations: Observation[];
@@ -632,7 +632,7 @@ export async function buildSurveyBackup(surveyId: string): Promise<SurveyBackup>
   const speciesList = survey.speciesListId ? await getSpeciesList(survey.speciesListId) : null;
   return {
     format: "inventera-mera-backup",
-    formatVersion: 4,
+    formatVersion: 5,
     exportedAt: new Date().toISOString(),
     survey,
     locales: (await listLocales(surveyId)).map(({ observationCount: _, ...locale }) => locale),
@@ -726,9 +726,9 @@ function readOrMigrateDatabase(value: unknown): BrowserDatabase {
       () => Crypto.randomUUID(),
     );
     return {
-      schemaVersion: 4,
+      schemaVersion: 5,
       surveys: (candidate.surveys as unknown[]).map(surveyWithoutRegion),
-      locales: migrated.locales,
+      locales: migrated.locales.map(localeWithObservationDefaults),
       observations: migrated.observations,
       speciesLists: [],
       speciesListEntries: [],
@@ -745,9 +745,9 @@ function readOrMigrateDatabase(value: unknown): BrowserDatabase {
       throw new Error("Databasversionen stöds inte.");
     }
     return {
-      schemaVersion: 4,
+      schemaVersion: 5,
       surveys: (candidate.surveys as unknown[]).map(surveyWithoutRegion),
-      locales: candidate.locales as SurveyLocale[],
+      locales: (candidate.locales as unknown[]).map(localeWithObservationDefaults),
       observations: candidate.observations as Observation[],
       speciesLists: [],
       speciesListEntries: [],
@@ -758,7 +758,9 @@ function readOrMigrateDatabase(value: unknown): BrowserDatabase {
     };
   }
   if (
-    (candidate.schemaVersion !== 3 && candidate.schemaVersion !== SCHEMA_VERSION) ||
+    (candidate.schemaVersion !== 3 &&
+      candidate.schemaVersion !== 4 &&
+      candidate.schemaVersion !== SCHEMA_VERSION) ||
     !Array.isArray(candidate.surveys) ||
     !Array.isArray(candidate.locales) ||
     !Array.isArray(candidate.observations) ||
@@ -771,10 +773,22 @@ function readOrMigrateDatabase(value: unknown): BrowserDatabase {
     throw new Error("Databasversionen stöds inte.");
   }
   const migrated = candidate as unknown as BrowserDatabase;
-  migrated.schemaVersion = 4;
+  migrated.schemaVersion = 5;
   migrated.surveys = (candidate.surveys as unknown[]).map(surveyWithoutRegion);
+  migrated.locales = (candidate.locales as unknown[]).map(localeWithObservationDefaults);
   migrated.drafts = withoutObsoleteSurveyDrafts(migrated.drafts);
   return migrated;
+}
+
+function localeWithObservationDefaults(value: unknown): SurveyLocale {
+  if (!value || typeof value !== "object") throw new Error("Lokalen är ogiltig.");
+  return {
+    ...(value as SurveyLocale),
+    useLocaleTimeByDefault:
+      (value as Partial<SurveyLocale>).useLocaleTimeByDefault === true,
+    useLocalePositionByDefault:
+      (value as Partial<SurveyLocale>).useLocalePositionByDefault === true,
+  };
 }
 
 function deleteUnsupportedAmountData(state: BrowserDatabase): BrowserDatabase {

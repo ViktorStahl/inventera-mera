@@ -1,6 +1,6 @@
 import * as Location from "expo-location";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 
 import { VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
@@ -32,9 +32,12 @@ import {
 import { SpeciesPicker } from "@/features/taxonomy/SpeciesPicker";
 import { AmountUnitPicker } from "./AmountUnitPicker";
 import {
+  newObservationDraft,
+  shouldAutomaticallyCapturePosition,
+} from "./observationDefaults";
+import {
   ObservationDetailsAccordion,
   observationDetailsHaveErrors,
-  observationDetailsInitiallyExpanded,
 } from "./ObservationDetailsSection";
 import { dismissToLocale } from "@/navigation/hierarchy";
 import {
@@ -59,27 +62,6 @@ import { Field } from "@/ui/Field";
 import { Screen } from "@/ui/Screen";
 import { colors, spacing } from "@/ui/theme";
 
-function draftFromLocale(locale: SurveyLocale): ObservationDraft {
-  return {
-    date: localDateFromIso(locale.observedAt),
-    time: localTimeFromIso(locale.observedAt),
-    timeOverridden: false,
-    northing: locale.position.rt90.northing.toString(),
-    easting: locale.position.rt90.easting.toString(),
-    accuracyMeters: locale.position.accuracyMeters?.toString() ?? "",
-    positionSource: locale.position.source,
-    positionOverridden: false,
-    latitude: locale.position.wgs84.latitude,
-    longitude: locale.position.wgs84.longitude,
-    speciesQuery: "",
-    amount: "",
-    unit: "",
-    publicComment: "",
-    additionalObservers: "",
-    addToSpeciesList: false,
-  };
-}
-
 export function ObservationFormScreen({ editing = false }: { editing?: boolean }) {
   const params = useLocalSearchParams<{
     surveyId: string;
@@ -103,6 +85,8 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
   const [deleting, setDeleting] = useState(false);
   const [locating, setLocating] = useState(false);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const automaticLocationRequestKey = useRef<string | undefined>(undefined);
+  const locationRequestSequence = useRef(0);
   const draftSpeciesQuery = draft?.speciesQuery ?? "";
   const draftSelectedTaxon = draft?.selectedTaxon;
   const draftKey = surveyId && locale && (!editing || observationId)
@@ -129,6 +113,49 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
     ? speciesMembership.contained
     : undefined;
 
+  const captureLocation = useCallback(async () => {
+    const requestSequence = ++locationRequestSequence.current;
+    setLocating(true);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (requestSequence !== locationRequestSequence.current) return;
+      if (!permission.granted) {
+        setDetailsExpanded(true);
+        Alert.alert("Position nekades", "Du kan fortfarande skriva in RT90-koordinater manuellt.");
+        return;
+      }
+      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      if (requestSequence !== locationRequestSequence.current) return;
+      const rt90 = wgs84ToRt90({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+      setDraft((current) => current ? {
+        ...current,
+        northing: rt90.northing.toFixed(2),
+        easting: rt90.easting.toFixed(2),
+        accuracyMeters: location.coords.accuracy == null ? "" : location.coords.accuracy.toFixed(1),
+        positionSource: "device",
+        positionOverridden: true,
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      } : current);
+      setErrors((current) => ({
+        ...current,
+        northing: undefined,
+        easting: undefined,
+        accuracyMeters: undefined,
+      }));
+    } catch (error) {
+      if (requestSequence === locationRequestSequence.current) {
+        setDetailsExpanded(true);
+        Alert.alert("Positionen kunde inte hämtas", `${messageOf(error)} Du kan skriva in RT90-koordinater manuellt.`);
+      }
+    } finally {
+      if (requestSequence === locationRequestSequence.current) setLocating(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!surveyId || (editing && !observationId) || (!editing && !params.localeId)) return;
     async function hydrate() {
@@ -147,7 +174,7 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
       const stored = await loadDraft<ObservationDraft>(key);
       const baseDraft = loadedObservation
         ? observationToDraft(loadedObservation)
-        : draftFromLocale(loadedLocale);
+        : newObservationDraft(loadedLocale);
       const loadedSpeciesList = survey.speciesListId
         ? await getSpeciesList(survey.speciesListId)
         : null;
@@ -161,12 +188,19 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
         addToSpeciesList: stored.addToSpeciesList ?? false,
       } : baseDraft;
       setDraft(nextDraft);
-      setDetailsExpanded(observationDetailsInitiallyExpanded(nextDraft));
+      setDetailsExpanded(false);
+      if (shouldAutomaticallyCapturePosition(loadedLocale, editing, stored != null)) {
+        const requestKey = `${surveyId}:${localeId}`;
+        if (automaticLocationRequestKey.current !== requestKey) {
+          automaticLocationRequestKey.current = requestKey;
+          void captureLocation();
+        }
+      }
     }
     hydrate()
       .catch((error) => Alert.alert("Kunde inte öppna observationen", messageOf(error)))
       .finally(() => setHydrated(true));
-  }, [editing, observationId, params.localeId, surveyId]);
+  }, [captureLocation, editing, observationId, params.localeId, surveyId]);
 
   useDraftAutosave(draftKey, draft, hydrated);
 
@@ -226,6 +260,8 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
   }
 
   function updateManualCoordinate(key: "northing" | "easting", value: string) {
+    locationRequestSequence.current += 1;
+    setLocating(false);
     setDraft((current) =>
       current
         ? {
@@ -263,6 +299,8 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
 
   function useLocalePosition() {
     if (!locale) return;
+    locationRequestSequence.current += 1;
+    setLocating(false);
     setDraft((current) => current ? {
       ...current,
       northing: locale.position.rt90.northing.toString(),
@@ -284,34 +322,6 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
       time: timeLocal(now),
       timeOverridden: true,
     } : current);
-  }
-
-  async function captureLocation() {
-    setLocating(true);
-    try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert("Position nekades", "Du kan fortfarande skriva in RT90-koordinater manuellt.");
-        return;
-      }
-      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const rt90 = wgs84ToRt90({ latitude: location.coords.latitude, longitude: location.coords.longitude });
-      setDraft((current) => current ? {
-        ...current,
-        northing: rt90.northing.toFixed(2),
-        easting: rt90.easting.toFixed(2),
-        accuracyMeters: location.coords.accuracy == null ? "" : location.coords.accuracy.toFixed(1),
-        positionSource: "device",
-        positionOverridden: true,
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      } : current);
-      setErrors((current) => ({ ...current, northing: undefined, easting: undefined, accuracyMeters: undefined }));
-    } catch (error) {
-      Alert.alert("Positionen kunde inte hämtas", `${messageOf(error)} Du kan skriva in RT90-koordinater manuellt.`);
-    } finally {
-      setLocating(false);
-    }
   }
 
   async function save() {

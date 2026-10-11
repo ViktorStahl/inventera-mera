@@ -36,6 +36,8 @@ const locale: SurveyLocale = {
     source: "device",
   },
   note: "Fuktig äng",
+  useLocaleTimeByDefault: false,
+  useLocalePositionByDefault: false,
   createdAt: "2026-07-31T08:00:00.000Z",
   updatedAt: "2026-07-31T08:00:00.000Z",
 };
