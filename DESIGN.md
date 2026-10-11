@@ -105,6 +105,9 @@ independent of platform views where practical.
 ### Confirmed product decisions
 
 - Swedish is the first interface language; the code remains translation-ready.
+- The Expo launcher icon and web favicon use the square 1024 × 1024
+  `icon/app-icon.png` asset. Android also uses it as the adaptive-icon
+  foreground over a matching green background.
 - The MVP is local-only. It has no account, login, server-side survey storage,
   or synchronization. JSON backup/restore is the lossless transfer mechanism,
   while Excel is the human/external-system export.

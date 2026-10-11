@@ -19,11 +19,16 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION"
-      ]
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./icon/app-icon.png",
+        "backgroundColor": "#2A6D38"
+      }
     },
     "web": {
       "bundler": "metro",
-      "output": "single"
+      "output": "single",
+      "favicon": "./icon/app-icon.png"
     },
     "plugins": [
       "expo-router",
@@ -34,6 +39,14 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "688ec7be-0d32-47f2-894d-5ca7d6cf7c5e"
+      }
+    },
+    "owner": "viktor-stahl",
+    "icon": "./icon/app-icon.png"
   }
 }
