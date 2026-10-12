@@ -1,8 +1,13 @@
 # Inventera mera — agent guide
 
-Read [DESIGN.md](./DESIGN.md) before planning or changing the application. It is
-the source of truth for product scope, user flows, data contracts, offline
-behaviour, architecture, and acceptance criteria.
+Read [DESIGN.md](./DESIGN.md) and the relevant linked documents before planning
+or changing the application. DESIGN.md is the source of truth for product
+scope, user flows, domain behavior, external contracts, and acceptance
+criteria. [docs/architecture.md](./docs/architecture.md) and
+[docs/decisions/](./docs/decisions/) record implementation architecture and
+decisions; [docs/migrations.md](./docs/migrations.md) defines supported storage
+formats; [docs/testing.md](./docs/testing.md) describes verification;
+[STATUS.md](./STATUS.md) records current implementation status.
 
 ## Working rules
 
@@ -41,7 +46,7 @@ behaviour, architecture, and acceptance criteria.
 - Amount units are restricted to `stjälkar/strån/skott`, `plantor/tuvor`, `m2`,
   `dm2`, and `cm2`; never offer or persist custom units. This rule intentionally
   uses startup cleanup rather than a new schema migration, as documented in
-  `DESIGN.md`.
+  `docs/migrations.md`.
 - Preserve the Survey → Locale → Observation hierarchy. `Lokalnamn` is the
   required owning locale's current name. New observations default to current
   time and a new position; each locale may independently default future
@@ -60,14 +65,18 @@ behaviour, architecture, and acceptance criteria.
   usage policy forbids that. Use a provider that explicitly permits offline
   use, or a self-hosted map package, and retain required attribution.
 - Use Lantmäteriet's downloadable raster topographic map as the MVP basemap,
-  subject to the packaging/licensing verification defined in `DESIGN.md`.
-- Make schema changes through explicit SQLite migrations and keep export
-  compatibility in mind.
-- Add or update automated tests with each behaviour change. Test offline
-  workflows, coordinate transformations, persistence migrations, and exports
-  as appropriate.
-- Record any deliberate deviation or newly resolved product decision in
-  `DESIGN.md` in the same change.
+  subject to the packaging/licensing verification in
+  `docs/decisions/map-source.md`.
+- Native and browser storage schema v6 and JSON backup format v5 are the
+  currently supported formats. Do not add migration support for local schemas
+  1–5 or backup formats 1–4. A future schema change must explicitly define its
+  supported upgrade path from the then-current format and recovery boundary in
+  `docs/migrations.md`, and keep the backup contract in DESIGN.md.
+- Add or update automated tests with each behavior change. Test offline
+  workflows, coordinate transformations, current-format persistence, and
+  exports as appropriate; see `docs/testing.md`.
+- Record product decisions in `DESIGN.md` and implementation/architecture
+  decisions in the relevant `docs/decisions/` document in the same change.
 
 ## Initial delivery order
 

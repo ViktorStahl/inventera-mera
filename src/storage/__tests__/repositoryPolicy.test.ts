@@ -75,13 +75,11 @@ describe("shared repository policy", () => {
     expect(resolved.position).toBe(input.position);
   });
 
-  it("defaults missing locale settings when restoring a version 4 backup", () => {
-    const legacyLocale = { ...locale } as Partial<SurveyLocale>;
-    delete legacyLocale.useLocaleTimeByDefault;
-    delete legacyLocale.useLocalePositionByDefault;
+  it("preserves locale defaults when normalizing the current backup format", () => {
+    const currentLocale = { ...locale, useLocaleTimeByDefault: true };
     const backup = normalizeSurveyBackup({
       format: "inventera-mera-backup",
-      formatVersion: 4,
+      formatVersion: 5,
       exportedAt: "2026-10-11T12:00:00.000Z",
       survey: {
         id: "survey-1",
@@ -91,13 +89,13 @@ describe("shared repository policy", () => {
         createdAt: "2026-10-11T12:00:00.000Z",
         updatedAt: "2026-10-11T12:00:00.000Z",
       },
-      locales: [legacyLocale],
+      locales: [currentLocale],
       observations: [],
-    }, () => "unused");
+    });
 
     expect(backup.formatVersion).toBe(5);
     expect(backup.locales[0]).toMatchObject({
-      useLocaleTimeByDefault: false,
+      useLocaleTimeByDefault: true,
       useLocalePositionByDefault: false,
     });
   });

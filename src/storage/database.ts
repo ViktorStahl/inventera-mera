@@ -37,7 +37,6 @@ import {
   type DyntaxaTaxonMetadata,
 } from "@/domain/achievements";
 import { calculateStatisticsSummary, type StatisticsObservation, type StatisticsSummary } from "@/domain/statistics";
-import { migrateLegacyObservations, type LegacyObservation } from "./migrateLocales";
 import {
   localeDraftKey,
   localeEditDraftKey,
@@ -81,13 +80,13 @@ let taxonomyDatabasePromise: Promise<SQLite.SQLiteDatabase> | undefined;
 type LocaleInput = Omit<SurveyLocale, "id" | "createdAt" | "updatedAt">;
 
 export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
-  if (!databasePromise) databasePromise = openAndMigrate();
+  if (!databasePromise) databasePromise = openAndInitialize();
   return databasePromise;
 }
 
-async function openAndMigrate(): Promise<SQLite.SQLiteDatabase> {
+async function openAndInitialize(): Promise<SQLite.SQLiteDatabase> {
   const database = await SQLite.openDatabaseAsync(DATABASE_NAME);
-  await database.execAsync("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+  await database.execAsync("PRAGMA foreign_keys = ON;");
   const versionRow = await database.getFirstAsync<{ user_version: number }>(
     "PRAGMA user_version",
   );
@@ -95,14 +94,165 @@ async function openAndMigrate(): Promise<SQLite.SQLiteDatabase> {
   if (version > SCHEMA_VERSION) {
     throw new Error("Databasen skapades av en nyare version av Inventera mera.");
   }
-  if (version < 1) await migrateToVersionOne(database);
-  if (version < 2) await migrateToVersionTwo(database);
-  if (version < 3) await migrateToVersionThree(database);
-  if (version < 4) await migrateToVersionFour(database);
-  if (version < 5) await migrateToVersionFive(database);
-  if (version < 6) await migrateToVersionSix(database);
+  let initializeFreshDatabase = false;
+  if (version === 0) {
+    const existingTable = await database.getFirstAsync<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' LIMIT 1",
+    );
+    if (existingTable) throw unsupportedDatabaseVersion();
+    initializeFreshDatabase = true;
+  } else if (version < SCHEMA_VERSION) {
+    throw unsupportedDatabaseVersion();
+  }
+  await database.execAsync("PRAGMA journal_mode = WAL;");
+  if (initializeFreshDatabase) await createCurrentSchema(database);
   await deleteUnsupportedAmountData(database);
   return database;
+}
+
+function unsupportedDatabaseVersion(): Error {
+  return new Error(
+    "Den lokala databasen har ett äldre format som inte stöds. Exportera en JSON-backup i format 5 med en kompatibel appversion, återställ appdata och importera sedan backupen.",
+  );
+}
+
+async function createCurrentSchema(database: SQLite.SQLiteDatabase): Promise<void> {
+  await database.withTransactionAsync(async () => {
+    await database.execAsync(`
+      CREATE TABLE species_lists (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+        taxonomy_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE species_list_entries (
+        id TEXT PRIMARY KEY NOT NULL,
+        species_list_id TEXT NOT NULL REFERENCES species_lists(id) ON DELETE CASCADE,
+        species_key TEXT NOT NULL,
+        taxon_id TEXT,
+        species_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(species_list_id, species_key)
+      );
+
+      CREATE INDEX species_lists_name ON species_lists(name COLLATE NOCASE);
+      CREATE INDEX species_list_entries_list_created
+        ON species_list_entries(species_list_id, created_at ASC);
+      CREATE INDEX species_list_entries_list_taxon
+        ON species_list_entries(species_list_id, taxon_id);
+
+      CREATE TABLE surveys (
+        id TEXT PRIMARY KEY NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        taxonomy_json TEXT,
+        survey_date TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('active', 'archived')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        species_list_id TEXT REFERENCES species_lists(id) ON DELETE SET NULL
+      );
+
+      CREATE TABLE locales (
+        id TEXT PRIMARY KEY NOT NULL,
+        survey_id TEXT NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+        name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+        observed_at TEXT NOT NULL,
+        time_zone TEXT NOT NULL,
+        latitude REAL NOT NULL,
+        longitude REAL NOT NULL,
+        rt90_northing REAL NOT NULL,
+        rt90_easting REAL NOT NULL,
+        accuracy_meters REAL,
+        position_source TEXT NOT NULL,
+        note TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        use_locale_time_by_default INTEGER NOT NULL DEFAULT 0
+          CHECK(use_locale_time_by_default IN (0, 1)),
+        use_locale_position_by_default INTEGER NOT NULL DEFAULT 0
+          CHECK(use_locale_position_by_default IN (0, 1))
+      );
+
+      CREATE INDEX locales_survey_created ON locales(survey_id, created_at ASC);
+      CREATE INDEX locales_survey_name ON locales(survey_id, name COLLATE NOCASE);
+
+      CREATE TABLE observations (
+        id TEXT PRIMARY KEY NOT NULL,
+        locale_id TEXT NOT NULL REFERENCES locales(id) ON DELETE CASCADE,
+        observed_at_override TEXT,
+        time_zone_override TEXT,
+        latitude_override REAL,
+        longitude_override REAL,
+        rt90_northing_override REAL,
+        rt90_easting_override REAL,
+        accuracy_meters_override REAL,
+        position_source_override TEXT,
+        species_json TEXT NOT NULL,
+        amount_value REAL,
+        amount_unit TEXT,
+        public_comment TEXT,
+        additional_observers_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK (
+          (observed_at_override IS NULL AND time_zone_override IS NULL) OR
+          (observed_at_override IS NOT NULL AND time_zone_override IS NOT NULL)
+        ),
+        CHECK (
+          (position_source_override IS NULL AND latitude_override IS NULL AND
+           longitude_override IS NULL AND rt90_northing_override IS NULL AND
+           rt90_easting_override IS NULL AND accuracy_meters_override IS NULL) OR
+          (position_source_override IS NOT NULL AND latitude_override IS NOT NULL AND
+           longitude_override IS NOT NULL AND rt90_northing_override IS NOT NULL AND
+           rt90_easting_override IS NOT NULL)
+        ),
+        CHECK (
+          (amount_value IS NULL AND amount_unit IS NULL) OR
+          (amount_value IS NOT NULL AND amount_unit IS NOT NULL AND length(trim(amount_unit)) > 0)
+        )
+      );
+
+      CREATE INDEX observations_locale_created
+        ON observations(locale_id, created_at ASC);
+      CREATE INDEX observations_locale_observed
+        ON observations(locale_id, observed_at_override);
+
+      CREATE TABLE drafts (
+        key TEXT PRIMARY KEY NOT NULL,
+        value_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE VIRTUAL TABLE taxon_search USING fts5(
+        id UNINDEXED,
+        preferred_name,
+        scientific_name,
+        synonyms,
+        taxon_rank UNINDEXED,
+        status UNINDEXED,
+        tokenize = 'unicode61 remove_diacritics 2'
+      );
+
+      CREATE TABLE app_settings (
+        id INTEGER PRIMARY KEY NOT NULL CHECK(id = 1),
+        default_taxonomy_package_id TEXT NOT NULL
+      );
+
+      CREATE TABLE achievements (
+        achievement_id TEXT PRIMARY KEY NOT NULL,
+        achieved_at TEXT NOT NULL,
+        acknowledged_at TEXT
+      );
+    `);
+    await database.runAsync(
+      "INSERT INTO app_settings(id, default_taxonomy_package_id) VALUES (1, ?)",
+      VASCULAR_PLANTS_TAXONOMY.packageId,
+    );
+    await database.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+  });
 }
 
 async function deleteUnsupportedAmountData(
@@ -162,253 +312,6 @@ async function openTaxonomyDatabase(): Promise<SQLite.SQLiteDatabase> {
     throw new Error("Det installerade taxonomipaketet har fel version eller innehåll.");
   }
   return database;
-}
-
-async function migrateToVersionOne(database: SQLite.SQLiteDatabase): Promise<void> {
-  await database.withTransactionAsync(async () => {
-    await database.execAsync(`
-      CREATE TABLE surveys (
-        id TEXT PRIMARY KEY NOT NULL,
-        title TEXT NOT NULL,
-        description TEXT,
-        county_code TEXT NOT NULL,
-        county_name TEXT NOT NULL,
-        municipality_code TEXT,
-        municipality_name TEXT,
-        region_free_text TEXT,
-        region_source TEXT NOT NULL,
-        region_source_version TEXT NOT NULL,
-        taxonomy_json TEXT,
-        survey_date TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('active', 'archived')),
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE observations (
-        id TEXT PRIMARY KEY NOT NULL,
-        survey_id TEXT NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
-        observed_at TEXT NOT NULL,
-        time_zone TEXT NOT NULL,
-        locality_name TEXT NOT NULL,
-        latitude REAL NOT NULL,
-        longitude REAL NOT NULL,
-        rt90_northing REAL NOT NULL,
-        rt90_easting REAL NOT NULL,
-        accuracy_meters REAL,
-        position_source TEXT NOT NULL,
-        species_json TEXT NOT NULL,
-        amount_value REAL,
-        amount_unit TEXT,
-        public_comment TEXT,
-        additional_observers_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        CHECK (
-          (amount_value IS NULL AND amount_unit IS NULL) OR
-          (amount_value IS NOT NULL AND amount_unit IS NOT NULL AND length(trim(amount_unit)) > 0)
-        )
-      );
-
-      CREATE INDEX observations_survey_created
-        ON observations(survey_id, created_at DESC);
-      CREATE INDEX observations_survey_observed
-        ON observations(survey_id, observed_at);
-
-      CREATE TABLE drafts (
-        key TEXT PRIMARY KEY NOT NULL,
-        value_json TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      -- FTS5 reserves "rank" for its hidden relevance-score column.
-      CREATE VIRTUAL TABLE taxon_search USING fts5(
-        id UNINDEXED,
-        preferred_name,
-        scientific_name,
-        synonyms,
-        taxon_rank UNINDEXED,
-        status UNINDEXED,
-        tokenize = 'unicode61 remove_diacritics 2'
-      );
-
-      PRAGMA user_version = 1;
-    `);
-  });
-}
-
-async function migrateToVersionTwo(database: SQLite.SQLiteDatabase): Promise<void> {
-  await database.withTransactionAsync(async () => {
-    const legacyRows = await database.getAllAsync<LegacyObservationRow>(
-      "SELECT * FROM observations ORDER BY created_at ASC",
-    );
-    const migrated = migrateLegacyObservations(
-      legacyRows.filter(rowHasSupportedAmount).map(legacyObservationFromRow),
-      () => Crypto.randomUUID(),
-    );
-
-    await database.execAsync(`
-      DROP INDEX IF EXISTS observations_survey_created;
-      DROP INDEX IF EXISTS observations_survey_observed;
-      ALTER TABLE observations RENAME TO observations_v1;
-
-      CREATE TABLE locales (
-        id TEXT PRIMARY KEY NOT NULL,
-        survey_id TEXT NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
-        name TEXT NOT NULL CHECK(length(trim(name)) > 0),
-        observed_at TEXT NOT NULL,
-        time_zone TEXT NOT NULL,
-        latitude REAL NOT NULL,
-        longitude REAL NOT NULL,
-        rt90_northing REAL NOT NULL,
-        rt90_easting REAL NOT NULL,
-        accuracy_meters REAL,
-        position_source TEXT NOT NULL,
-        note TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE INDEX locales_survey_created ON locales(survey_id, created_at ASC);
-      CREATE INDEX locales_survey_name ON locales(survey_id, name COLLATE NOCASE);
-
-      CREATE TABLE observations (
-        id TEXT PRIMARY KEY NOT NULL,
-        locale_id TEXT NOT NULL REFERENCES locales(id) ON DELETE CASCADE,
-        observed_at_override TEXT,
-        time_zone_override TEXT,
-        latitude_override REAL,
-        longitude_override REAL,
-        rt90_northing_override REAL,
-        rt90_easting_override REAL,
-        accuracy_meters_override REAL,
-        position_source_override TEXT,
-        species_json TEXT NOT NULL,
-        amount_value REAL,
-        amount_unit TEXT,
-        public_comment TEXT,
-        additional_observers_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        CHECK (
-          (observed_at_override IS NULL AND time_zone_override IS NULL) OR
-          (observed_at_override IS NOT NULL AND time_zone_override IS NOT NULL)
-        ),
-        CHECK (
-          (position_source_override IS NULL AND latitude_override IS NULL AND
-           longitude_override IS NULL AND rt90_northing_override IS NULL AND
-           rt90_easting_override IS NULL AND accuracy_meters_override IS NULL) OR
-          (position_source_override IS NOT NULL AND latitude_override IS NOT NULL AND
-           longitude_override IS NOT NULL AND rt90_northing_override IS NOT NULL AND
-           rt90_easting_override IS NOT NULL)
-        ),
-        CHECK (
-          (amount_value IS NULL AND amount_unit IS NULL) OR
-          (amount_value IS NOT NULL AND amount_unit IS NOT NULL AND length(trim(amount_unit)) > 0)
-        )
-      );
-
-      CREATE INDEX observations_locale_created
-        ON observations(locale_id, created_at ASC);
-      CREATE INDEX observations_locale_observed
-        ON observations(locale_id, observed_at_override);
-    `);
-
-    for (const locale of migrated.locales) await insertLocale(database, locale);
-    for (const observation of migrated.observations) {
-      await insertObservation(database, observation);
-    }
-
-    await database.execAsync(`
-      DROP TABLE observations_v1;
-      DELETE FROM drafts;
-      PRAGMA user_version = 2;
-    `);
-  });
-}
-
-async function migrateToVersionThree(database: SQLite.SQLiteDatabase): Promise<void> {
-  await database.withTransactionAsync(async () => {
-    await database.execAsync(`
-      CREATE TABLE species_lists (
-        id TEXT PRIMARY KEY NOT NULL,
-        name TEXT NOT NULL CHECK(length(trim(name)) > 0),
-        taxonomy_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE species_list_entries (
-        id TEXT PRIMARY KEY NOT NULL,
-        species_list_id TEXT NOT NULL REFERENCES species_lists(id) ON DELETE CASCADE,
-        species_key TEXT NOT NULL,
-        taxon_id TEXT,
-        species_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        UNIQUE(species_list_id, species_key)
-      );
-
-      CREATE INDEX species_lists_name ON species_lists(name COLLATE NOCASE);
-      CREATE INDEX species_list_entries_list_created
-        ON species_list_entries(species_list_id, created_at ASC);
-      CREATE INDEX species_list_entries_list_taxon
-        ON species_list_entries(species_list_id, taxon_id);
-
-      ALTER TABLE surveys ADD COLUMN species_list_id TEXT
-        REFERENCES species_lists(id) ON DELETE SET NULL;
-
-      CREATE TABLE app_settings (
-        id INTEGER PRIMARY KEY NOT NULL CHECK(id = 1),
-        default_taxonomy_package_id TEXT NOT NULL
-      );
-
-      INSERT INTO app_settings(id, default_taxonomy_package_id)
-      VALUES (1, 'vascular-plants-starter');
-
-      PRAGMA user_version = 3;
-    `);
-  });
-}
-
-async function migrateToVersionFour(database: SQLite.SQLiteDatabase): Promise<void> {
-  await database.withTransactionAsync(async () => {
-    await database.execAsync(`
-      ALTER TABLE surveys DROP COLUMN county_code;
-      ALTER TABLE surveys DROP COLUMN county_name;
-      ALTER TABLE surveys DROP COLUMN municipality_code;
-      ALTER TABLE surveys DROP COLUMN municipality_name;
-      ALTER TABLE surveys DROP COLUMN region_free_text;
-      ALTER TABLE surveys DROP COLUMN region_source;
-      ALTER TABLE surveys DROP COLUMN region_source_version;
-      DELETE FROM drafts WHERE key = 'survey:new' OR key LIKE 'survey:edit:%';
-      PRAGMA user_version = 4;
-    `);
-  });
-}
-
-async function migrateToVersionFive(database: SQLite.SQLiteDatabase): Promise<void> {
-  await database.withTransactionAsync(async () => {
-    await database.execAsync(`
-      ALTER TABLE locales ADD COLUMN use_locale_time_by_default INTEGER NOT NULL DEFAULT 0
-        CHECK(use_locale_time_by_default IN (0, 1));
-      ALTER TABLE locales ADD COLUMN use_locale_position_by_default INTEGER NOT NULL DEFAULT 0
-        CHECK(use_locale_position_by_default IN (0, 1));
-      PRAGMA user_version = 5;
-    `);
-  });
-}
-
-async function migrateToVersionSix(database: SQLite.SQLiteDatabase): Promise<void> {
-  await database.withTransactionAsync(async () => {
-    await database.execAsync(`
-      CREATE TABLE achievements (
-        achievement_id TEXT PRIMARY KEY NOT NULL,
-        achieved_at TEXT NOT NULL,
-        acknowledged_at TEXT
-      );
-      PRAGMA user_version = 6;
-    `);
-  });
 }
 
 export async function listAchievementAwards(): Promise<AchievementAward[]> {
@@ -1232,7 +1135,7 @@ export async function buildSurveyBackup(surveyId: string): Promise<SurveyBackup>
 }
 
 export async function restoreSurveyBackup(value: unknown): Promise<string> {
-  const backup = normalizeSurveyBackup(value, () => Crypto.randomUUID());
+  const backup = normalizeSurveyBackup(value);
   const database = await getDatabase();
   const existingSpeciesList = backup.speciesList
     ? await getSpeciesList(backup.speciesList.list.id)
@@ -1566,30 +1469,6 @@ function observationFromRow(row: ObservationRow): Observation {
   };
 }
 
-function legacyObservationFromRow(row: LegacyObservationRow): LegacyObservation {
-  return {
-    id: row.id,
-    surveyId: row.survey_id,
-    observedAt: row.observed_at,
-    timeZone: row.time_zone,
-    localityName: row.locality_name,
-    position: positionFromValues(
-      row.latitude,
-      row.longitude,
-      row.rt90_northing,
-      row.rt90_easting,
-      row.accuracy_meters,
-      row.position_source,
-    ),
-    species: JSON.parse(row.species_json) as SpeciesSnapshot,
-    amount: amountFromValues(row.amount_value, row.amount_unit),
-    publicComment: row.public_comment ?? undefined,
-    additionalObservers: JSON.parse(row.additional_observers_json) as string[],
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
 function positionFromValues(
   latitude: number,
   longitude: number,
@@ -1604,17 +1483,6 @@ function positionFromValues(
     accuracyMeters: accuracy ?? undefined,
     source,
   };
-}
-
-function rowHasSupportedAmount(row: {
-  amount_value: number | null;
-  amount_unit: string | null;
-}): boolean {
-  if (row.amount_value == null && row.amount_unit == null) return true;
-  return isSupportedObservationAmount({
-    value: row.amount_value,
-    unit: row.amount_unit,
-  });
 }
 
 function amountFromValues(
@@ -1711,27 +1579,6 @@ type ObservationRow = {
   effective_rt90_easting: number;
   effective_accuracy_meters: number | null;
   effective_position_source: Position["source"];
-};
-
-type LegacyObservationRow = {
-  id: string;
-  survey_id: string;
-  observed_at: string;
-  time_zone: string;
-  locality_name: string;
-  latitude: number;
-  longitude: number;
-  rt90_northing: number;
-  rt90_easting: number;
-  accuracy_meters: number | null;
-  position_source: Position["source"];
-  species_json: string;
-  amount_value: number | null;
-  amount_unit: string | null;
-  public_comment: string | null;
-  additional_observers_json: string;
-  created_at: string;
-  updated_at: string;
 };
 
 type TaxonRow = {

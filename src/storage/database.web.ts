@@ -33,7 +33,6 @@ import {
   type DyntaxaTaxonMetadata,
 } from "@/domain/achievements";
 import { calculateStatisticsSummary, type StatisticsObservation, type StatisticsSummary } from "@/domain/statistics";
-import { migrateLegacyObservations, type LegacyObservation } from "./migrateLocales";
 import {
   localeDraftKey,
   localeEditDraftKey,
@@ -51,7 +50,6 @@ import {
   speciesListEntryToTaxon,
   speciesSnapshotMatches,
   surveyEditDraftKey,
-  surveyWithoutRegion,
   taxonMatchScore,
   taxonomyReference,
   type ObservationInput,
@@ -109,12 +107,12 @@ export async function getDatabase(): Promise<BrowserDatabase> {
   }
   try {
     const parsed = JSON.parse(stored) as unknown;
-    database = deleteUnsupportedAmountData(readOrMigrateDatabase(parsed));
+    database = deleteUnsupportedAmountData(readCurrentDatabase(parsed));
     persist(database);
     return database;
   } catch {
     throw new Error(
-      "Den lokala webbdatan kunde inte läsas. Rensa webbplatsdata eller återställ en JSON-backup.",
+      "Den lokala webbdatan har ett äldre eller ogiltigt format. Exportera en JSON-backup i format 5 med en kompatibel appversion innan du rensar webbplatsdata.",
     );
   }
 }
@@ -771,7 +769,7 @@ export async function buildSurveyBackup(surveyId: string): Promise<SurveyBackup>
 }
 
 export async function restoreSurveyBackup(value: unknown): Promise<string> {
-  const backup = normalizeSurveyBackup(value, () => Crypto.randomUUID());
+  const backup = normalizeSurveyBackup(value);
   const state = await getDatabase();
   if (backup.speciesList) {
     const restoredList = backup.speciesList.list;
@@ -842,85 +840,25 @@ function emptyDatabase(): BrowserDatabase {
   };
 }
 
-function readOrMigrateDatabase(value: unknown): BrowserDatabase {
+function readCurrentDatabase(value: unknown): BrowserDatabase {
   if (!value || typeof value !== "object") throw new Error("Ogiltig databas.");
   const candidate = value as Record<string, unknown>;
-  if (candidate.schemaVersion === 1) {
-    if (!Array.isArray(candidate.surveys) || !Array.isArray(candidate.observations)) {
-      throw new Error("Databasversionen stöds inte.");
-    }
-    const migrated = migrateLegacyObservations(
-      candidate.observations as LegacyObservation[],
-      () => Crypto.randomUUID(),
-    );
-    return {
-      schemaVersion: 6,
-      surveys: (candidate.surveys as unknown[]).map(surveyWithoutRegion),
-      locales: migrated.locales.map(localeWithObservationDefaults),
-      observations: migrated.observations,
-      speciesLists: [],
-      speciesListEntries: [],
-      settings: { defaultTaxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId },
-      achievements: [],
-      drafts: {},
-    };
-  }
-  if (candidate.schemaVersion === 2) {
-    if (
-      !Array.isArray(candidate.surveys) ||
-      !Array.isArray(candidate.locales) ||
-      !Array.isArray(candidate.observations)
-    ) {
-      throw new Error("Databasversionen stöds inte.");
-    }
-    return {
-      schemaVersion: 6,
-      surveys: (candidate.surveys as unknown[]).map(surveyWithoutRegion),
-      locales: (candidate.locales as unknown[]).map(localeWithObservationDefaults),
-      observations: candidate.observations as Observation[],
-      speciesLists: [],
-      speciesListEntries: [],
-      settings: { defaultTaxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId },
-      achievements: [],
-      drafts: withoutObsoleteSurveyDrafts(
-        (candidate.drafts as Record<string, unknown> | undefined) ?? {},
-      ),
-    };
-  }
   if (
-    (candidate.schemaVersion !== 3 &&
-      candidate.schemaVersion !== 4 &&
-      candidate.schemaVersion !== 5 &&
-      candidate.schemaVersion !== SCHEMA_VERSION) ||
+    candidate.schemaVersion !== SCHEMA_VERSION ||
     !Array.isArray(candidate.surveys) ||
     !Array.isArray(candidate.locales) ||
     !Array.isArray(candidate.observations) ||
     !Array.isArray(candidate.speciesLists) ||
     !Array.isArray(candidate.speciesListEntries) ||
+    !Array.isArray(candidate.achievements) ||
     !candidate.settings ||
     !candidate.drafts ||
-    typeof candidate.drafts !== "object"
+    typeof candidate.drafts !== "object" ||
+    Array.isArray(candidate.drafts)
   ) {
     throw new Error("Databasversionen stöds inte.");
   }
-  const migrated = candidate as unknown as BrowserDatabase;
-  migrated.schemaVersion = 6;
-  migrated.achievements ??= [];
-  migrated.surveys = (candidate.surveys as unknown[]).map(surveyWithoutRegion);
-  migrated.locales = (candidate.locales as unknown[]).map(localeWithObservationDefaults);
-  migrated.drafts = withoutObsoleteSurveyDrafts(migrated.drafts);
-  return migrated;
-}
-
-function localeWithObservationDefaults(value: unknown): SurveyLocale {
-  if (!value || typeof value !== "object") throw new Error("Lokalen är ogiltig.");
-  return {
-    ...(value as SurveyLocale),
-    useLocaleTimeByDefault:
-      (value as Partial<SurveyLocale>).useLocaleTimeByDefault === true,
-    useLocalePositionByDefault:
-      (value as Partial<SurveyLocale>).useLocalePositionByDefault === true,
-  };
+  return candidate as unknown as BrowserDatabase;
 }
 
 function deleteUnsupportedAmountData(state: BrowserDatabase): BrowserDatabase {
@@ -942,14 +880,6 @@ function observationDraftHasSupportedUnit(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const unit = (value as { unit?: unknown }).unit;
   return unit === undefined || unit === "" || isObservationUnit(unit);
-}
-
-function withoutObsoleteSurveyDrafts(drafts: Record<string, unknown>): Record<string, unknown> {
-  const migrated = { ...drafts };
-  for (const key of Object.keys(migrated)) {
-    if (key === "survey:new" || key.startsWith("survey:edit:")) delete migrated[key];
-  }
-  return migrated;
 }
 
 function deleteSurveyDrafts(state: BrowserDatabase, surveyId: string): void {

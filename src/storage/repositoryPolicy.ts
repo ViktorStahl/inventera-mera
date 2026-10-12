@@ -11,7 +11,6 @@ import type {
   TaxonomyReference,
 } from "@/domain/models";
 import { normalizeSpeciesName, speciesKey } from "@/domain/species";
-import { migrateLegacyObservations, type LegacyObservation } from "./migrateLocales";
 
 export type ObservationInput = Omit<Observation, "id" | "createdAt" | "updatedAt">;
 
@@ -149,15 +148,6 @@ export function optionalText(value: string): string | undefined {
   return trimmed || undefined;
 }
 
-export function surveyWithoutRegion(value: unknown): Survey {
-  if (!value || typeof value !== "object") {
-    throw new Error("Inventeringen är ogiltig.");
-  }
-  const survey = { ...(value as Record<string, unknown>) };
-  delete survey.region;
-  return survey as Survey;
-}
-
 export function taxonomyReference(taxonomy: TaxonomyReference): TaxonomyReference {
   return {
     packageId: taxonomy.packageId,
@@ -166,67 +156,21 @@ export function taxonomyReference(taxonomy: TaxonomyReference): TaxonomyReferenc
   };
 }
 
-function localeWithObservationDefaults(value: SurveyLocale): SurveyLocale {
-  return {
-    ...value,
-    useLocaleTimeByDefault: value.useLocaleTimeByDefault === true,
-    useLocalePositionByDefault: value.useLocalePositionByDefault === true,
-  };
-}
-
-export function normalizeSurveyBackup(
-  value: unknown,
-  createId: () => string,
-): SurveyBackup {
+export function normalizeSurveyBackup(value: unknown): SurveyBackup {
   if (!value || typeof value !== "object") throw new Error("Filen är inte en giltig backup.");
   const backup = value as Record<string, unknown>;
-  if (backup.format !== "inventera-mera-backup" || !backup.survey) {
-    throw new Error("Backupformatet stöds inte.");
-  }
-  const survey = surveyWithoutRegion(backup.survey);
-  if (backup.formatVersion === 1 && Array.isArray(backup.observations)) {
-    const migrated = migrateLegacyObservations(
-      (backup.observations as LegacyObservation[]).filter((observation) =>
-        isSupportedObservationAmount(observation.amount),
-      ),
-      createId,
-    );
-    return {
-      format: "inventera-mera-backup",
-      formatVersion: 5,
-      exportedAt:
-        typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString(),
-      survey,
-      locales: migrated.locales.map(localeWithObservationDefaults),
-      observations: migrated.observations,
-    };
-  }
   if (
-    backup.formatVersion === 2 &&
-    Array.isArray(backup.locales) &&
-    Array.isArray(backup.observations)
-  ) {
-    return {
-      format: "inventera-mera-backup",
-      formatVersion: 5,
-      exportedAt:
-        typeof backup.exportedAt === "string" ? backup.exportedAt : new Date().toISOString(),
-      survey,
-      locales: (backup.locales as SurveyLocale[]).map(localeWithObservationDefaults),
-      observations: (backup.observations as Observation[]).filter((observation) =>
-        isSupportedObservationAmount(observation.amount),
-      ),
-    };
-  }
-  if (
-    (backup.formatVersion !== 3 &&
-      backup.formatVersion !== 4 &&
-      backup.formatVersion !== 5) ||
+    backup.format !== "inventera-mera-backup" ||
+    backup.formatVersion !== 5 ||
+    typeof backup.exportedAt !== "string" ||
+    !backup.survey ||
+    typeof backup.survey !== "object" ||
     !Array.isArray(backup.locales) ||
     !Array.isArray(backup.observations)
   ) {
     throw new Error("Backupformatet stöds inte.");
   }
+  const survey = backup.survey as Survey;
   if (
     backup.speciesList !== undefined &&
     (
@@ -241,8 +185,6 @@ export function normalizeSurveyBackup(
   const normalized = {
     ...backup,
     survey,
-    formatVersion: 5,
-    locales: (backup.locales as SurveyLocale[]).map(localeWithObservationDefaults),
   } as unknown as SurveyBackup;
   if (normalized.locales.some((locale) => locale.surveyId !== survey.id)) {
     throw new Error("Backupen innehåller lokaler från en annan inventering.");
