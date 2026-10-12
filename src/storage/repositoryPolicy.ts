@@ -11,6 +11,15 @@ import type {
   TaxonomyReference,
 } from "@/domain/models";
 import { normalizeSpeciesName, speciesKey } from "@/domain/species";
+import {
+  isObservation,
+  isObservationBeforeAmountCleanup,
+  isSpeciesList,
+  isSpeciesListEntry,
+  isSurvey,
+  isSurveyLocale,
+  isUnknownRecord,
+} from "./recordValidation";
 
 export type ObservationInput = Omit<Observation, "id" | "createdAt" | "updatedAt">;
 
@@ -156,28 +165,46 @@ export function taxonomyReference(taxonomy: TaxonomyReference): TaxonomyReferenc
   };
 }
 
-export function normalizeSurveyBackup(value: unknown): SurveyBackup {
+export function parseSurveyBackupV5(value: unknown): SurveyBackup {
   if (!value || typeof value !== "object") throw new Error("Filen är inte en giltig backup.");
   const backup = value as Record<string, unknown>;
   if (
     backup.format !== "inventera-mera-backup" ||
     backup.formatVersion !== 5 ||
     typeof backup.exportedAt !== "string" ||
-    !backup.survey ||
-    typeof backup.survey !== "object" ||
     !Array.isArray(backup.locales) ||
     !Array.isArray(backup.observations)
   ) {
     throw new Error("Backupformatet stöds inte.");
   }
-  const survey = backup.survey as Survey;
+  if (!isSurvey(backup.survey)) {
+    throw new Error("Backupen innehåller en ogiltig inventering.");
+  }
+  const survey = backup.survey;
+  if (!backup.locales.every(isSurveyLocale)) {
+    throw new Error("Backupen innehåller en ogiltig lokal.");
+  }
+  const observations: Observation[] = [];
+  for (const observation of backup.observations) {
+    if (
+      isObservationBeforeAmountCleanup(observation) &&
+      isUnknownRecord(observation) &&
+      !isSupportedObservationAmount(observation.amount)
+    ) {
+      continue;
+    }
+    if (!isObservation(observation)) {
+      throw new Error("Backupen innehåller en ogiltig observation.");
+    }
+    observations.push(observation);
+  }
   if (
     backup.speciesList !== undefined &&
     (
-      !backup.speciesList ||
-      typeof backup.speciesList !== "object" ||
-      !(backup.speciesList as Record<string, unknown>).list ||
-      !Array.isArray((backup.speciesList as Record<string, unknown>).entries)
+      !isUnknownRecord(backup.speciesList) ||
+      !isSpeciesList(backup.speciesList.list) ||
+      !Array.isArray(backup.speciesList.entries) ||
+      !backup.speciesList.entries.every(isSpeciesListEntry)
     )
   ) {
     throw new Error("Backupens artlista är ogiltig.");
@@ -185,6 +212,8 @@ export function normalizeSurveyBackup(value: unknown): SurveyBackup {
   const normalized = {
     ...backup,
     survey,
+    locales: backup.locales,
+    observations,
   } as unknown as SurveyBackup;
   if (normalized.locales.some((locale) => locale.surveyId !== survey.id)) {
     throw new Error("Backupen innehåller lokaler från en annan inventering.");
@@ -222,10 +251,5 @@ export function normalizeSurveyBackup(value: unknown): SurveyBackup {
       throw new Error("Backupen innehåller ogiltiga poster i artlistan.");
     }
   }
-  return {
-    ...normalized,
-    observations: normalized.observations.filter((observation) =>
-      isSupportedObservationAmount(observation.amount),
-    ),
-  };
+  return normalized;
 }

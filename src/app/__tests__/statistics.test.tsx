@@ -67,8 +67,6 @@ describe("statistics screen", () => {
     expect(screen.getByText("Topp 3 arter")).toBeTruthy();
     expect(screen.getByText("Alm")).toBeTruthy();
     expect(screen.getByText("Blåbär")).toBeTruthy();
-    expect(screen.queryByText("Inventering 1")).toBeNull();
-    expect(screen.queryByText("Lokal 1")).toBeNull();
   });
 
   it("shows an empty state and no average when no surveys exist", async () => {

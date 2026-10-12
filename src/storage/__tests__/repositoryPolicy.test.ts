@@ -1,12 +1,11 @@
-import type { Observation, SpeciesList, SurveyLocale } from "@/domain/models";
+import type { SpeciesList, SurveyLocale } from "@/domain/models";
 import {
   localeDraftKey,
   localeEditDraftKey,
-  normalizeSurveyBackup,
+  parseSurveyBackupV5,
   normalizeSpeciesForList,
   observationDraftKey,
   observationEditDraftKey,
-  resolveObservationInput,
   speciesSnapshotMatches,
   surveyEditDraftKey,
   taxonMatchScore,
@@ -29,25 +28,6 @@ const locale: SurveyLocale = {
   updatedAt: "2026-08-15T07:00:00.000Z",
 };
 
-function observationInput(): Omit<Observation, "id" | "createdAt" | "updatedAt"> {
-  return {
-    surveyId: "wrong-survey",
-    localeId: "wrong-locale",
-    localityName: "Gammalt namn",
-    observedAt: "2026-08-15T10:00:00+02:00",
-    timeZone: "Europe/Stockholm",
-    position: {
-      wgs84: { latitude: 58, longitude: 12 },
-      rt90: { northing: 6_500_000, easting: 1_400_000, crs: "EPSG:3847" },
-      source: "manual-rt90",
-    },
-    timeOverridden: false,
-    positionOverridden: false,
-    species: { source: "free-text", enteredName: "Ängsvädd" },
-    additionalObservers: [],
-  };
-}
-
 describe("shared repository policy", () => {
   it("builds stable draft identities for every form level", () => {
     expect(surveyEditDraftKey("survey-1")).toBe("survey:edit:survey-1");
@@ -58,26 +38,8 @@ describe("shared repository policy", () => {
       .toBe("observation:edit:survey-1:locale-1:observation-1");
   });
 
-  it("resolves inherited values from the current locale", () => {
-    expect(resolveObservationInput(observationInput(), locale)).toMatchObject({
-      surveyId: "survey-1",
-      localeId: "locale-1",
-      localityName: "Lillåsen",
-      observedAt: locale.observedAt,
-      position: locale.position,
-    });
-  });
-
-  it("preserves explicit time and position overrides", () => {
-    const input = { ...observationInput(), timeOverridden: true, positionOverridden: true };
-    const resolved = resolveObservationInput(input, locale);
-    expect(resolved.observedAt).toBe(input.observedAt);
-    expect(resolved.position).toBe(input.position);
-  });
-
-  it("preserves locale defaults when normalizing the current backup format", () => {
-    const currentLocale = { ...locale, useLocaleTimeByDefault: true };
-    const backup = normalizeSurveyBackup({
+  it("rejects malformed records in a format-v5 backup", () => {
+    const backup = {
       format: "inventera-mera-backup",
       formatVersion: 5,
       exportedAt: "2026-10-11T12:00:00.000Z",
@@ -89,15 +51,22 @@ describe("shared repository policy", () => {
         createdAt: "2026-10-11T12:00:00.000Z",
         updatedAt: "2026-10-11T12:00:00.000Z",
       },
-      locales: [currentLocale],
+      locales: [locale],
       observations: [],
-    });
+    };
 
-    expect(backup.formatVersion).toBe(5);
-    expect(backup.locales[0]).toMatchObject({
-      useLocaleTimeByDefault: true,
-      useLocalePositionByDefault: false,
-    });
+    expect(() => parseSurveyBackupV5({
+      ...backup,
+      survey: { ...backup.survey, status: "unknown" },
+    })).toThrow("ogiltig inventering");
+    expect(() => parseSurveyBackupV5({
+      ...backup,
+      locales: [{ ...locale, position: { latitude: 57.7, longitude: 11.9 } }],
+    })).toThrow("ogiltig lokal");
+    expect(() => parseSurveyBackupV5({
+      ...backup,
+      locales: [{ ...locale, surveyId: "survey-2" }],
+    })).toThrow("annan inventering");
   });
 
   it("normalizes taxonomy species to the list taxonomy", () => {

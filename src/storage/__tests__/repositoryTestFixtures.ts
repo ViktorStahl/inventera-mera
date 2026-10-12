@@ -6,9 +6,14 @@ export type ContractRepository = Pick<
   | "createSurvey"
   | "createLocale"
   | "createObservation"
+  | "updateObservation"
+  | "deleteObservation"
   | "listLocaleObservations"
   | "updateLocale"
   | "createSpeciesList"
+  | "addSpeciesToList"
+  | "listSpeciesListEntries"
+  | "removeSpeciesFromList"
   | "speciesListContains"
   | "buildSurveyBackup"
   | "restoreSurveyBackup"
@@ -19,6 +24,10 @@ export type ContractRepository = Pick<
   | "getSurvey"
   | "listLocales"
   | "listObservations"
+  | "getStatisticsSummary"
+  | "saveDraft"
+  | "loadDraft"
+  | "deleteDraft"
 >;
 
 let nextId = 0;

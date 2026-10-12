@@ -26,29 +26,87 @@ describe("browser storage", () => {
 
   it("cleans incompatible amounts and drafts from current-schema data", async () => {
     const storage = new MemoryStorage();
-    storage.setItem("inventera-mera:web:v1", JSON.stringify({
-      schemaVersion: 6,
-      surveys: [],
-      locales: [],
-      observations: [
-        { id: "invalid", amount: { value: 1, unit: "individer" } },
-        { id: "valid", amount: { value: 2, unit: "m2" } },
-      ],
-      speciesLists: [],
-      speciesListEntries: [],
-      settings: { defaultTaxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId },
-      achievements: [],
-      drafts: {
-        "observation:new:invalid": { unit: "individer" },
-        "observation:new:valid": { unit: "m2" },
-      },
-    }));
+    const initial = freshBrowserRepository(storage).repository;
+    const survey = await initial.createSurvey(freshSurveyDraft());
+    const locale = await initial.createLocale(freshLocaleInput(survey.id));
+    const invalid = await initial.createObservation(
+      freshObservationInput(survey.id, locale, { amount: { value: 1, unit: "m2" } }),
+    );
+    const valid = await initial.createObservation(
+      freshObservationInput(survey.id, locale, {
+        species: { source: "free-text", enteredName: "Klockljung" },
+        amount: { value: 2, unit: "m2" },
+      }),
+    );
+    await initial.saveDraft("observation:new:invalid", { unit: "individer" });
+    await initial.saveDraft("observation:new:valid", { unit: "m2" });
+    const stored = JSON.parse(storage.getItem("inventera-mera:web:v1") ?? "{}") as {
+      observations: Observation[];
+    };
+    const invalidObservation = stored.observations.find((item) => item.id === invalid.id);
+    if (!invalidObservation) throw new Error("Testobservationen saknas.");
+    invalidObservation.amount = {
+      value: 1,
+      unit: "individer",
+    } as unknown as Observation["amount"];
+    storage.setItem("inventera-mera:web:v1", JSON.stringify(stored));
+
     const { repository } = freshBrowserRepository(storage);
 
     const database = await repository.getDatabase();
 
-    expect(database.observations.map((observation) => observation.id)).toEqual(["valid"]);
+    expect(database.observations.map((observation) => observation.id)).toEqual([valid.id]);
     expect(database.drafts).toEqual({ "observation:new:valid": { unit: "m2" } });
+  });
+
+  it("rejects malformed current-schema records instead of accepting partial data", async () => {
+    const storage = new MemoryStorage();
+    const initial = freshBrowserRepository(storage).repository;
+    await initial.getDatabase();
+    const stored = JSON.parse(storage.getItem("inventera-mera:web:v1") ?? "{}") as {
+      surveys: unknown[];
+    };
+    stored.surveys.push({ id: "partial-survey", title: "Ofullständig" });
+    storage.setItem("inventera-mera:web:v1", JSON.stringify(stored));
+
+    const repository = freshBrowserRepository(storage).repository;
+    await expect(repository.getDatabase()).rejects.toThrow("äldre eller ogiltigt format");
+  });
+
+  it("rejects current-schema records with broken ownership relationships", async () => {
+    const storage = new MemoryStorage();
+    const initial = freshBrowserRepository(storage).repository;
+    const survey = await initial.createSurvey(freshSurveyDraft());
+    await initial.createLocale(freshLocaleInput(survey.id));
+    const stored = JSON.parse(storage.getItem("inventera-mera:web:v1") ?? "{}") as {
+      surveys: unknown[];
+    };
+    stored.surveys = [];
+    storage.setItem("inventera-mera:web:v1", JSON.stringify(stored));
+
+    const repository = freshBrowserRepository(storage).repository;
+    await expect(repository.getDatabase()).rejects.toThrow("äldre eller ogiltigt format");
+  });
+
+  it("does not expose a failed localStorage write through the in-memory cache", async () => {
+    class QuotaStorage extends MemoryStorage {
+      failWrites = false;
+
+      setItem(key: string, value: string): void {
+        if (this.failWrites) throw new DOMException("Full", "QuotaExceededError");
+        super.setItem(key, value);
+      }
+    }
+
+    const storage = new QuotaStorage();
+    const repository = freshBrowserRepository(storage).repository;
+    await repository.getDatabase();
+    storage.failWrites = true;
+
+    await expect(repository.createSurvey(freshSurveyDraft())).rejects.toThrow("lagringsutrymme");
+    storage.failWrites = false;
+    expect(await repository.listSurveys()).toEqual([]);
+    expect(JSON.parse(storage.getItem("inventera-mera:web:v1") ?? "{}").surveys).toEqual([]);
   });
 
   it("prioritizes list taxonomy matches and includes free-text list entries", async () => {
@@ -74,23 +132,6 @@ describe("browser storage", () => {
       preferredName: "Okänd ängsväxt",
       inSpeciesList: true,
     });
-  });
-
-  it("summarizes active and archived observations and drops deleted records", async () => {
-    const { repository } = freshBrowserRepository();
-    const active = await repository.createSurvey(freshSurveyDraft("Aktiv"));
-    const archived = await repository.createSurvey(freshSurveyDraft("Arkiverad"));
-    const activeLocale = await repository.createLocale(freshLocaleInput(active.id, "Aktiv lokal"));
-    const archivedLocale = await repository.createLocale(
-      freshLocaleInput(archived.id, "Arkiverad lokal"),
-    );
-    await repository.createObservation(freshObservationInput(active.id, activeLocale));
-    await repository.createObservation(freshObservationInput(archived.id, archivedLocale));
-    await repository.archiveSurvey(archived.id);
-
-    expect((await repository.getStatisticsSummary()).totalObservations).toBe(2);
-    await repository.deleteSurvey(archived.id);
-    expect((await repository.getStatisticsSummary()).totalObservations).toBe(1);
   });
 
   it("persists achievement awards across browser module reloads", async () => {

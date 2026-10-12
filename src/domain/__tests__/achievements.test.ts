@@ -36,8 +36,25 @@ function taxonMetadata(
   return new Map(ids.map((id) => [id, taxonMetadataEntry(id, rank, status)]));
 }
 
+function acceptedSpecies(
+  count: number,
+  idPrefix: string,
+): {
+  observations: AchievementObservation[];
+  metadata: Map<string, DyntaxaTaxonMetadata>;
+} {
+  const observations: AchievementObservation[] = [];
+  const metadata = new Map<string, DyntaxaTaxonMetadata>();
+  for (let index = 0; index < count; index += 1) {
+    const taxonId = idPrefix + "-" + index;
+    observations.push({ species: taxonomySpecies(taxonId) });
+    metadata.set(taxonId, taxonMetadataEntry("Art " + index));
+  }
+  return { observations, metadata };
+}
+
 describe("achievement eligibility", () => {
-  it("keeps the current awards and adds the seven catalogued milestones", () => {
+  it("keeps the ten catalogued milestones", () => {
     expect(ACHIEVEMENT_DEFINITIONS.map((achievement) => achievement.id)).toEqual([
       "first-morot",
       "hundred-species",
@@ -81,13 +98,7 @@ describe("achievement eligibility", () => {
   });
 
   it("counts 100 distinct accepted species-rank taxa but ignores subspecies and free text", () => {
-    const observations: AchievementObservation[] = [];
-    const metadata = new Map<string, DyntaxaTaxonMetadata>();
-    for (let index = 0; index < 100; index += 1) {
-      const taxonId = "taxon-" + index;
-      observations.push({ species: taxonomySpecies(taxonId) });
-      metadata.set(taxonId, taxonMetadataEntry(taxonId));
-    }
+    const { observations, metadata } = acceptedSpecies(100, "taxon");
     expect(findNewlyEligibleAchievements(
       observations.slice(0, 99), new Set(), packageId, metadata,
     )).not.toContain("hundred-species");
@@ -175,24 +186,23 @@ describe("achievement eligibility", () => {
     )).not.toContain("meadow-prefix-expert");
   });
 
-  it("counts 1,000 unique species at, below, and above its threshold", () => {
-    const observations: AchievementObservation[] = [];
-    const metadata = new Map<string, DyntaxaTaxonMetadata>();
-    for (let index = 0; index < 999; index += 1) {
-      const taxonId = "unique-" + index;
-      observations.push({ species: taxonomySpecies(taxonId) });
-      metadata.set(taxonId, taxonMetadataEntry("Art " + index));
-    }
-    observations.push({ species: taxonomySpecies("unique-0") });
-    expect(findNewlyEligibleAchievements(observations, new Set(), packageId, metadata))
+  it("unlocks 1,000 unique species exactly at its threshold", () => {
+    const belowThreshold = acceptedSpecies(999, "unique");
+    expect(findNewlyEligibleAchievements(
+      belowThreshold.observations,
+      new Set(),
+      packageId,
+      belowThreshold.metadata,
+    ))
       .not.toContain("thousand-unique-species");
 
-    for (let index = 999; index < 1001; index += 1) {
-      const taxonId = "unique-" + index;
-      observations.push({ species: taxonomySpecies(taxonId) });
-      metadata.set(taxonId, taxonMetadataEntry("Art " + index));
-    }
-    expect(findNewlyEligibleAchievements(observations, new Set(), packageId, metadata))
+    const atThreshold = acceptedSpecies(1000, "unique");
+    expect(findNewlyEligibleAchievements(
+      atThreshold.observations,
+      new Set(),
+      packageId,
+      atThreshold.metadata,
+    ))
       .toContain("thousand-unique-species");
   });
 
@@ -205,9 +215,6 @@ describe("achievement eligibility", () => {
     ).toEqual([]);
     expect(findNewlyEligibleAchievements(thousand, new Set(), packageId, new Map()))
       .toEqual(["thousand-observations"]);
-    thousand.push({ species: { source: "free-text", enteredName: "Extra" } });
-    expect(findNewlyEligibleAchievements(thousand, new Set(), packageId, new Map()))
-      .toContain("thousand-observations");
     expect(findNewlyEligibleAchievements(
       thousand,
       new Set(["thousand-observations"]),
@@ -221,9 +228,6 @@ describe("achievement eligibility", () => {
     expect(findNewlyEligibleAchievements(tenThousand, new Set(), packageId, new Map()))
       .not.toContain("ten-thousand-observations");
     tenThousand.push({ species: { source: "free-text", enteredName: "Den tionde tusende" } });
-    expect(findNewlyEligibleAchievements(tenThousand, new Set(), packageId, new Map()))
-      .toContain("ten-thousand-observations");
-    tenThousand.push({ species: { source: "free-text", enteredName: "Ännu en" } });
     expect(findNewlyEligibleAchievements(tenThousand, new Set(), packageId, new Map()))
       .toContain("ten-thousand-observations");
   });

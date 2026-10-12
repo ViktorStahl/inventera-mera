@@ -1,41 +1,44 @@
-import * as Location from "expo-location";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 
 import { VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
-import { rt90ToWgs84, wgs84ToRt90 } from "@/domain/coordinates";
 import type {
   Observation,
   ObservationDraft,
   SpeciesList,
-  SpeciesSnapshot,
   Survey,
   SurveyLocale,
   Taxon,
 } from "@/domain/models";
-import { speciesKey, taxonomySpeciesSnapshot } from "@/domain/species";
+import { speciesKey } from "@/domain/species";
 import {
-  currentTimeZone,
   localDateFromIso,
-  localDateTimeWithOffset,
   localTimeFromIso,
   timeLocal,
   todayLocal,
 } from "@/domain/time";
 import {
   hasErrors,
-  parseAdditionalObservers,
   validateObservationDraft,
   type ValidationErrors,
 } from "@/domain/validation";
 import { useAchievements } from "@/features/achievements/AchievementProvider";
+import {
+  captureCurrentDevicePosition,
+  DevicePositionPermissionError,
+} from "@/features/location/devicePosition";
 import { SpeciesPicker } from "@/features/taxonomy/SpeciesPicker";
 import { AmountUnitPicker } from "./AmountUnitPicker";
 import {
   newObservationDraft,
   shouldAutomaticallyCapturePosition,
 } from "./observationDefaults";
+import {
+  buildObservationInput,
+  observationToDraft,
+  speciesSnapshotForSelection,
+} from "./observationFormData";
 import {
   ObservationDetailsAccordion,
   observationDetailsHaveErrors,
@@ -119,28 +122,17 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
     const requestSequence = ++locationRequestSequence.current;
     setLocating(true);
     try {
-      const permission = await Location.requestForegroundPermissionsAsync();
+      const position = await captureCurrentDevicePosition();
       if (requestSequence !== locationRequestSequence.current) return;
-      if (!permission.granted) {
-        setDetailsExpanded(true);
-        Alert.alert("Position nekades", "Du kan fortfarande skriva in RT90-koordinater manuellt.");
-        return;
-      }
-      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      if (requestSequence !== locationRequestSequence.current) return;
-      const rt90 = wgs84ToRt90({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      });
       setDraft((current) => current ? {
         ...current,
-        northing: rt90.northing.toFixed(2),
-        easting: rt90.easting.toFixed(2),
-        accuracyMeters: location.coords.accuracy == null ? "" : location.coords.accuracy.toFixed(1),
+        northing: position.rt90.northing.toFixed(2),
+        easting: position.rt90.easting.toFixed(2),
+        accuracyMeters: position.accuracyMeters?.toFixed(1) ?? "",
         positionSource: "device",
         positionOverridden: true,
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
+        latitude: position.wgs84.latitude,
+        longitude: position.wgs84.longitude,
       } : current);
       setErrors((current) => ({
         ...current,
@@ -151,7 +143,11 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
     } catch (error) {
       if (requestSequence === locationRequestSequence.current) {
         setDetailsExpanded(true);
-        Alert.alert("Positionen kunde inte hämtas", `${messageOf(error)} Du kan skriva in RT90-koordinater manuellt.`);
+        if (error instanceof DevicePositionPermissionError) {
+          Alert.alert("Position nekades", "Du kan fortfarande skriva in RT90-koordinater manuellt.");
+        } else {
+          Alert.alert("Positionen kunde inte hämtas", `${messageOf(error)} Du kan skriva in RT90-koordinater manuellt.`);
+        }
       }
     } finally {
       if (requestSequence === locationRequestSequence.current) setLocating(false);
@@ -334,41 +330,7 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
     if (hasErrors(nextErrors)) return;
     setSaving(true);
     try {
-      const rt90 = {
-        northing: Number(draft.northing.replace(",", ".")),
-        easting: Number(draft.easting.replace(",", ".")),
-      };
-      const wgs84 =
-        draft.positionSource === "device" && draft.latitude != null && draft.longitude != null
-          ? { latitude: draft.latitude, longitude: draft.longitude }
-          : rt90ToWgs84(rt90);
-      const species = speciesSnapshotForSelection(
-        draft.speciesQuery,
-        draft.selectedTaxon,
-        survey,
-        observation,
-      );
-      const input = {
-        surveyId,
-        localeId: locale.id,
-        observedAt: localDateTimeWithOffset(draft.date, draft.time),
-        timeZone: draft.timeOverridden ? currentTimeZone() : locale.timeZone,
-        localityName: locale.name,
-        timeOverridden: draft.timeOverridden,
-        position: {
-          wgs84,
-          rt90: { ...rt90, crs: "EPSG:3847" as const },
-          accuracyMeters: draft.accuracyMeters.trim() ? Number(draft.accuracyMeters.replace(",", ".")) : undefined,
-          source: draft.positionSource,
-        },
-        positionOverridden: draft.positionOverridden,
-        species,
-        amount: draft.amount.trim() && draft.unit
-          ? { value: Number(draft.amount.replace(",", ".")), unit: draft.unit }
-          : undefined,
-        publicComment: draft.publicComment.trim() || undefined,
-        additionalObservers: parseAdditionalObservers(draft.additionalObservers),
-      };
+      const input = buildObservationInput(survey, locale, draft, observation);
       const addToListId = draft.addToSpeciesList ? speciesList?.id : undefined;
       if (editing && observationId) {
         await updateObservation(observationId, input, addToListId);
@@ -495,68 +457,6 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
       </View>
     </Screen>
   );
-}
-
-function observationToDraft(observation: Observation): ObservationDraft {
-  return {
-    date: localDateFromIso(observation.observedAt),
-    time: localTimeFromIso(observation.observedAt),
-    timeOverridden: observation.timeOverridden,
-    northing: observation.position.rt90.northing.toString(),
-    easting: observation.position.rt90.easting.toString(),
-    accuracyMeters: observation.position.accuracyMeters?.toString() ?? "",
-    positionSource: observation.position.source,
-    positionOverridden: observation.positionOverridden,
-    latitude: observation.position.wgs84.latitude,
-    longitude: observation.position.wgs84.longitude,
-    speciesQuery: observation.species.enteredName,
-    selectedTaxon: taxonFromObservation(observation),
-    amount: observation.amount?.value.toString() ?? "",
-    unit: observation.amount?.unit ?? "",
-    publicComment: observation.publicComment ?? "",
-    additionalObservers: observation.additionalObservers.join("; "),
-    addToSpeciesList: false,
-  };
-}
-
-function speciesSnapshotForSelection(
-  query: string,
-  selectedTaxon: Taxon | undefined,
-  survey: Survey,
-  original?: Observation,
-): SpeciesSnapshot {
-  if (!selectedTaxon || selectedTaxon.source === "free-text") {
-    return { source: "free-text", enteredName: query.trim() };
-  }
-  const keepsOriginalTaxon = selectedTaxon.id === original?.species.taxonId;
-  const taxonomy = selectedTaxon.taxonomyPackageId
-    ? {
-        packageId: selectedTaxon.taxonomyPackageId,
-        name: survey.taxonomyRef?.name ?? VASCULAR_PLANTS_TAXONOMY.name,
-        version: selectedTaxon.taxonomyVersion ?? survey.taxonomyRef?.version ?? VASCULAR_PLANTS_TAXONOMY.version,
-      }
-    : keepsOriginalTaxon && original?.species.taxonomyPackageId
-    ? {
-        packageId: original.species.taxonomyPackageId,
-        name: survey.taxonomyRef?.name ?? VASCULAR_PLANTS_TAXONOMY.name,
-        version: original.species.taxonomyVersion ?? survey.taxonomyRef?.version ?? VASCULAR_PLANTS_TAXONOMY.version,
-      }
-    : (survey.taxonomyRef ?? VASCULAR_PLANTS_TAXONOMY);
-  return taxonomySpeciesSnapshot(selectedTaxon, taxonomy, query);
-}
-
-function taxonFromObservation(observation: Observation): Taxon | undefined {
-  if (observation.species.source !== "taxonomy" || !observation.species.taxonId) return undefined;
-  return {
-    id: observation.species.taxonId,
-    preferredName: observation.species.preferredName ?? observation.species.enteredName,
-    scientificName: observation.species.scientificName ?? "",
-    synonyms: [],
-    rank: "",
-    status: "",
-    taxonomyPackageId: observation.species.taxonomyPackageId,
-    taxonomyVersion: observation.species.taxonomyVersion,
-  };
 }
 
 const styles = StyleSheet.create({

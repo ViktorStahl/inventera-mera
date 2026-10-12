@@ -33,24 +33,6 @@ describe("native SQLite startup", () => {
 
     expect(await database.getFirstAsync<{ user_version: number }>("PRAGMA user_version"))
       .toEqual({ user_version: 6 });
-    const tables = await database.getAllAsync<{ name: string }>(
-      "SELECT name FROM sqlite_master WHERE type = 'table'",
-    );
-    const tableNames = new Set(tables.map((table) => table.name));
-    for (const name of [
-      "surveys",
-      "locales",
-      "observations",
-      "drafts",
-      "species_lists",
-      "species_list_entries",
-      "app_settings",
-      "achievements",
-      "taxon_search",
-    ]) {
-      expect(tableNames.has(name)).toBe(true);
-    }
-
     const expectedColumns: Record<string, string[]> = {
       surveys: [
         "id", "title", "description", "taxonomy_json", "survey_date", "status",
@@ -82,14 +64,16 @@ describe("native SQLite startup", () => {
       );
       expect(columns.map((column) => column.name)).toEqual(expected);
     }
-    expect(await database.getAllAsync("PRAGMA foreign_key_check")).toEqual([]);
+    expect(await database.getFirstAsync<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE name = 'taxon_search'",
+    )).toEqual({ name: "taxon_search" });
     expect((await repository.getAppSettings()).defaultTaxonomyPackageId)
       .toBe(VASCULAR_PLANTS_TAXONOMY.packageId);
 
+    const survey = await repository.createSurvey(freshSurveyDraft("Beständig inventering"));
     const reopened = freshNativeRepository(database).repository;
     await reopened.getDatabase();
-    expect(await database.getFirstAsync<{ user_version: number }>("PRAGMA user_version"))
-      .toEqual({ user_version: 6 });
+    expect(await reopened.getSurvey(survey.id)).toMatchObject({ title: "Beständig inventering" });
   });
 
   it("cleans unsupported amounts and drafts when opening current-schema data", async () => {

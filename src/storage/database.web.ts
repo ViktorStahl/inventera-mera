@@ -4,8 +4,6 @@ import packagedTaxonomy from "@/data/generated/dyntaxaVascularPlants.json";
 import { findTaxonomy, VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
 import {
   assertSupportedObservationAmount,
-  isObservationUnit,
-  isSupportedObservationAmount,
 } from "@/domain/amount";
 import type {
   AppSettings,
@@ -38,22 +36,33 @@ import {
   localeEditDraftKey,
   localeEditDraftPrefix,
   normalizeSpeciesForList,
-  normalizeSurveyBackup,
+  parseSurveyBackupV5,
   observationDraftKey,
   observationDraftPrefix,
   observationEditDraftKey,
   observationEditDraftPrefix,
-  optionalText,
   assertSurveyIsActive,
   assertSurveyIsArchived,
-  resolveObservationInput,
   speciesListEntryToTaxon,
   speciesSnapshotMatches,
   surveyEditDraftKey,
   taxonMatchScore,
-  taxonomyReference,
   type ObservationInput,
 } from "./repositoryPolicy";
+import {
+  createLocaleRecord,
+  createObservationRecord,
+  createSurveyRecord,
+  updateLocaleRecord,
+  updateObservationRecord,
+  updateSurveyRecord,
+} from "./repositoryRecords";
+import {
+  commitBrowserDatabase,
+  getBrowserDatabase as getDatabase,
+  writableBrowserDatabase as writableDatabase,
+  type BrowserDatabase,
+} from "./browserDatabaseState";
 
 export {
   localeDraftKey,
@@ -62,9 +71,7 @@ export {
   observationEditDraftKey,
   surveyEditDraftKey,
 } from "./repositoryPolicy";
-
-const STORAGE_KEY = "inventera-mera:web:v1";
-const SCHEMA_VERSION = 6;
+export { getBrowserDatabase as getDatabase } from "./browserDatabaseState";
 
 type PackagedTaxon = [
   id: string,
@@ -78,44 +85,7 @@ type PackagedTaxon = [
 
 const PACKAGED_TAXA = packagedTaxonomy.taxa as PackagedTaxon[];
 
-type BrowserDatabase = {
-  schemaVersion: 6;
-  surveys: Survey[];
-  locales: SurveyLocale[];
-  observations: Observation[];
-  speciesLists: SpeciesList[];
-  speciesListEntries: SpeciesListEntry[];
-  settings: AppSettings;
-  achievements: AchievementAward[];
-  drafts: Record<string, unknown>;
-};
-
 type LocaleInput = Omit<SurveyLocale, "id" | "createdAt" | "updatedAt">;
-
-let database: BrowserDatabase | undefined;
-
-export async function getDatabase(): Promise<BrowserDatabase> {
-  if (database) return database;
-  if (typeof localStorage === "undefined") {
-    throw new Error("Webbläsarens lokala lagring är inte tillgänglig.");
-  }
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (!stored) {
-    database = emptyDatabase();
-    persist(database);
-    return database;
-  }
-  try {
-    const parsed = JSON.parse(stored) as unknown;
-    database = deleteUnsupportedAmountData(readCurrentDatabase(parsed));
-    persist(database);
-    return database;
-  } catch {
-    throw new Error(
-      "Den lokala webbdatan har ett äldre eller ogiltigt format. Exportera en JSON-backup i format 5 med en kompatibel appversion innan du rensar webbplatsdata.",
-    );
-  }
-}
 
 export async function getAppSettings(): Promise<AppSettings> {
   return { ...(await getDatabase()).settings };
@@ -123,9 +93,9 @@ export async function getAppSettings(): Promise<AppSettings> {
 
 export async function updateDefaultTaxonomy(packageId: string): Promise<void> {
   if (!findTaxonomy(packageId)) throw new Error("Taxonomin kunde inte hittas.");
-  const state = await getDatabase();
+  const state = await writableDatabase();
   state.settings.defaultTaxonomyPackageId = packageId;
-  persist(state);
+  commitBrowserDatabase(state);
 }
 
 export async function listSpeciesLists(
@@ -158,7 +128,7 @@ export async function createSpeciesList(
 ): Promise<SpeciesList> {
   if (!name.trim()) throw new Error("Ange ett namn på artlistan.");
   if (!findTaxonomy(taxonomyRef.packageId)) throw new Error("Taxonomin kunde inte hittas.");
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const now = new Date().toISOString();
   const list: SpeciesList = {
     id: Crypto.randomUUID(),
@@ -172,23 +142,23 @@ export async function createSpeciesList(
     updatedAt: now,
   };
   state.speciesLists.push(list);
-  persist(state);
+  commitBrowserDatabase(state);
   return list;
 }
 
 export async function renameSpeciesList(id: string, name: string): Promise<SpeciesList> {
   if (!name.trim()) throw new Error("Ange ett namn på artlistan.");
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const list = state.speciesLists.find((item) => item.id === id);
   if (!list) throw new Error("Artlistan kunde inte hittas.");
   list.name = name.trim();
   list.updatedAt = new Date().toISOString();
-  persist(state);
+  commitBrowserDatabase(state);
   return { ...list };
 }
 
 export async function deleteSpeciesList(id: string): Promise<void> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   if (!state.speciesLists.some((list) => list.id === id)) {
     throw new Error("Artlistan kunde inte hittas.");
   }
@@ -197,7 +167,7 @@ export async function deleteSpeciesList(id: string): Promise<void> {
   for (const survey of state.surveys) {
     if (survey.speciesListId === id) survey.speciesListId = undefined;
   }
-  persist(state);
+  commitBrowserDatabase(state);
 }
 
 export async function listSpeciesListEntries(listId: string): Promise<SpeciesListEntry[]> {
@@ -213,14 +183,14 @@ export async function addSpeciesToList(
   listId: string,
   species: SpeciesSnapshot,
 ): Promise<SpeciesListEntry> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const entry = addSpeciesToState(state, listId, species);
-  persist(state);
+  commitBrowserDatabase(state);
   return entry;
 }
 
 export async function removeSpeciesFromList(listId: string, entryId: string): Promise<void> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const index = state.speciesListEntries.findIndex(
     (entry) => entry.id === entryId && entry.speciesListId === listId,
   );
@@ -228,7 +198,7 @@ export async function removeSpeciesFromList(listId: string, entryId: string): Pr
   state.speciesListEntries.splice(index, 1);
   const list = state.speciesLists.find((item) => item.id === listId);
   if (list) list.updatedAt = new Date().toISOString();
-  persist(state);
+  commitBrowserDatabase(state);
 }
 
 export async function speciesListContains(
@@ -275,7 +245,7 @@ export async function getSurvey(id: string): Promise<Survey | null> {
 }
 
 export async function createSurvey(draft: SurveyDraft): Promise<Survey> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const taxonomy = findTaxonomy(draft.taxonomyPackageId);
   if (!taxonomy) throw new Error("Taxonomin kunde inte hittas.");
   const speciesList = draft.speciesListId
@@ -286,20 +256,10 @@ export async function createSurvey(draft: SurveyDraft): Promise<Survey> {
     throw new Error("Artlistan använder en annan taxonomi.");
   }
   const now = new Date().toISOString();
-  const survey: Survey = {
-    id: Crypto.randomUUID(),
-    title: draft.title.trim(),
-    description: optionalText(draft.description),
-    taxonomyRef: taxonomyReference(taxonomy),
-    speciesListId: speciesList?.id,
-    surveyDate: draft.surveyDate,
-    status: "active",
-    createdAt: now,
-    updatedAt: now,
-  };
+  const survey = createSurveyRecord(draft, taxonomy, speciesList, Crypto.randomUUID(), now);
   state.surveys.push(survey);
   delete state.drafts["survey:new"];
-  persist(state);
+  commitBrowserDatabase(state);
   return survey;
 }
 
@@ -307,7 +267,7 @@ export async function updateSurvey(
   id: string,
   draft: SurveyDraft,
 ): Promise<Survey> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const index = state.surveys.findIndex((survey) => survey.id === id);
   const existing = state.surveys[index];
   assertSurveyIsActive(existing);
@@ -320,23 +280,21 @@ export async function updateSurvey(
   if (speciesList && speciesList.taxonomyRef.packageId !== taxonomy.packageId) {
     throw new Error("Artlistan använder en annan taxonomi.");
   }
-  const updated: Survey = {
-    ...existing,
-    title: draft.title.trim(),
-    description: optionalText(draft.description),
-    taxonomyRef: taxonomyReference(taxonomy),
-    speciesListId: speciesList?.id,
-    surveyDate: draft.surveyDate,
-    updatedAt: new Date().toISOString(),
-  };
+  const updated = updateSurveyRecord(
+    existing,
+    draft,
+    taxonomy,
+    speciesList,
+    new Date().toISOString(),
+  );
   state.surveys[index] = updated;
   delete state.drafts[surveyEditDraftKey(id)];
-  persist(state);
+  commitBrowserDatabase(state);
   return updated;
 }
 
 export async function deleteSurvey(id: string): Promise<void> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const survey = state.surveys.find((item) => item.id === id);
   assertSurveyIsArchived(survey);
   const localeIds = new Set(
@@ -348,7 +306,7 @@ export async function deleteSurvey(id: string): Promise<void> {
     (observation) => !localeIds.has(observation.localeId),
   );
   deleteSurveyDrafts(state, id);
-  persist(state);
+  commitBrowserDatabase(state);
 }
 export async function archiveSurvey(id: string): Promise<Survey> {
   return updateSurveyArchiveStatus(id, "archived");
@@ -359,14 +317,14 @@ export async function restoreSurvey(id: string): Promise<Survey> {
 }
 
 async function updateSurveyArchiveStatus(id: string, status: Survey["status"]): Promise<Survey> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const index = state.surveys.findIndex((survey) => survey.id === id);
   const existing = state.surveys[index];
   if (!existing) throw new Error("Inventeringen kunde inte hittas.");
   if (existing.status === status) return existing;
   const updated = { ...existing, status, updatedAt: new Date().toISOString() };
   state.surveys[index] = updated;
-  persist(state);
+  commitBrowserDatabase(state);
   return updated;
 }
 
@@ -416,27 +374,29 @@ export async function evaluateAchievements(): Promise<AchievementAward[]> {
     taxonMetadata,
   );
   if (newAchievementIds.length > 0) {
+    const updatedState = await writableDatabase();
     const achievedAt = new Date().toISOString();
     for (const achievementId of newAchievementIds) {
-      state.achievements.push({ achievementId, achievedAt, acknowledgedAt: null });
+      updatedState.achievements.push({ achievementId, achievedAt, acknowledgedAt: null });
     }
-    persist(state);
+    commitBrowserDatabase(updatedState);
+    return sortAchievementAwards(updatedState.achievements);
   }
   return sortAchievementAwards(state.achievements);
 }
 
 export async function acknowledgeAchievement(achievementId: AchievementId): Promise<void> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const award = state.achievements.find((item) => item.achievementId === achievementId);
   if (!award || award.acknowledgedAt) return;
   award.acknowledgedAt = new Date().toISOString();
-  persist(state);
+  commitBrowserDatabase(state);
 }
 
 export async function resetAchievements(): Promise<void> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   state.achievements = [];
-  persist(state);
+  commitBrowserDatabase(state);
 }
 export async function getStatisticsSummary(): Promise<StatisticsSummary> {
   const state = await getDatabase();
@@ -487,51 +447,37 @@ export async function getLocale(
 }
 
 export async function createLocale(input: LocaleInput): Promise<SurveyLocale> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const survey = state.surveys.find((item) => item.id === input.surveyId);
   assertSurveyIsActive(survey);
   const now = new Date().toISOString();
-  const locale: SurveyLocale = {
-    ...input,
-    name: input.name.trim(),
-    note: optionalText(input.note ?? ""),
-    id: Crypto.randomUUID(),
-    createdAt: now,
-    updatedAt: now,
-  };
+  const locale = createLocaleRecord(input, Crypto.randomUUID(), now);
   state.locales.push(locale);
   survey.updatedAt = now;
   delete state.drafts[localeDraftKey(input.surveyId)];
-  persist(state);
+  commitBrowserDatabase(state);
   return locale;
 }
 
 export async function updateLocale(localeId: string, input: LocaleInput): Promise<SurveyLocale> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const index = state.locales.findIndex(
     (locale) => locale.id === localeId && locale.surveyId === input.surveyId,
   );
   const existing = state.locales[index];
   if (!existing) throw new Error("Lokalen kunde inte hittas.");
   assertSurveyIsActive(state.surveys.find((item) => item.id === input.surveyId));
-  const updated: SurveyLocale = {
-    ...input,
-    name: input.name.trim(),
-    note: optionalText(input.note ?? ""),
-    id: existing.id,
-    createdAt: existing.createdAt,
-    updatedAt: new Date().toISOString(),
-  };
+  const updated = updateLocaleRecord(existing, input, new Date().toISOString());
   state.locales[index] = updated;
   const survey = state.surveys.find((item) => item.id === input.surveyId);
   if (survey) survey.updatedAt = updated.updatedAt;
   delete state.drafts[localeEditDraftKey(input.surveyId, localeId)];
-  persist(state);
+  commitBrowserDatabase(state);
   return updated;
 }
 
 export async function deleteLocale(surveyId: string, localeId: string): Promise<void> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const index = state.locales.findIndex(
     (locale) => locale.id === localeId && locale.surveyId === surveyId,
   );
@@ -552,7 +498,7 @@ export async function deleteLocale(surveyId: string, localeId: string): Promise<
       delete state.drafts[key];
     }
   }
-  persist(state);
+  commitBrowserDatabase(state);
 }
 
 export async function listObservations(surveyId: string): Promise<Observation[]> {
@@ -600,7 +546,7 @@ export async function createObservation(
   addToSpeciesListId?: string,
 ): Promise<Observation> {
   assertSupportedObservationAmount(input.amount);
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const locale = state.locales.find(
     (item) => item.id === input.localeId && item.surveyId === input.surveyId,
   );
@@ -608,18 +554,13 @@ export async function createObservation(
   assertSurveyIsActive(state.surveys.find((item) => item.id === input.surveyId));
   if (addToSpeciesListId) assertSurveySpeciesList(state, input.surveyId, addToSpeciesListId);
   const now = new Date().toISOString();
-  const saved: Observation = {
-    ...resolveObservationInput(input, locale),
-    id: Crypto.randomUUID(),
-    createdAt: now,
-    updatedAt: now,
-  };
+  const saved = createObservationRecord(input, locale, Crypto.randomUUID(), now);
   state.observations.push(saved);
   if (addToSpeciesListId) addSpeciesToState(state, addToSpeciesListId, saved.species);
   const survey = state.surveys.find((item) => item.id === locale.surveyId);
   if (survey) survey.updatedAt = now;
   delete state.drafts[observationDraftKey(locale.surveyId, locale.id)];
-  persist(state);
+  commitBrowserDatabase(state);
   return saved;
 }
 
@@ -629,7 +570,7 @@ export async function updateObservation(
   addToSpeciesListId?: string,
 ): Promise<Observation> {
   assertSupportedObservationAmount(input.amount);
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const index = state.observations.findIndex((item) => item.id === observationId);
   const existing = state.observations[index];
   if (!existing) throw new Error("Observationen kunde inte hittas.");
@@ -639,18 +580,13 @@ export async function updateObservation(
   if (!locale) throw new Error("Lokalen kunde inte hittas.");
   assertSurveyIsActive(state.surveys.find((item) => item.id === input.surveyId));
   if (addToSpeciesListId) assertSurveySpeciesList(state, input.surveyId, addToSpeciesListId);
-  const updated: Observation = {
-    ...resolveObservationInput(input, locale),
-    id: existing.id,
-    createdAt: existing.createdAt,
-    updatedAt: new Date().toISOString(),
-  };
+  const updated = updateObservationRecord(existing, input, locale, new Date().toISOString());
   state.observations[index] = updated;
   if (addToSpeciesListId) addSpeciesToState(state, addToSpeciesListId, updated.species);
   const survey = state.surveys.find((item) => item.id === input.surveyId);
   if (survey) survey.updatedAt = updated.updatedAt;
   delete state.drafts[observationEditDraftKey(input.surveyId, input.localeId, observationId)];
-  persist(state);
+  commitBrowserDatabase(state);
   return updated;
 }
 
@@ -658,7 +594,7 @@ export async function deleteObservation(
   surveyId: string,
   observationId: string,
 ): Promise<void> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   const index = state.observations.findIndex((item) => item.id === observationId);
   const existing = state.observations[index];
   if (!existing) throw new Error("Observationen kunde inte hittas.");
@@ -671,7 +607,7 @@ export async function deleteObservation(
   const survey = state.surveys.find((item) => item.id === surveyId);
   if (survey) survey.updatedAt = new Date().toISOString();
   delete state.drafts[observationEditDraftKey(surveyId, locale.id, observationId)];
-  persist(state);
+  commitBrowserDatabase(state);
 }
 
 export async function searchTaxa(
@@ -735,9 +671,9 @@ export async function prepareTaxonomySearch(
 }
 
 export async function saveDraft<T>(key: string, value: T): Promise<void> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   state.drafts[key] = value;
-  persist(state);
+  commitBrowserDatabase(state);
 }
 
 export async function loadDraft<T>(key: string): Promise<T | null> {
@@ -746,9 +682,9 @@ export async function loadDraft<T>(key: string): Promise<T | null> {
 }
 
 export async function deleteDraft(key: string): Promise<void> {
-  const state = await getDatabase();
+  const state = await writableDatabase();
   delete state.drafts[key];
-  persist(state);
+  commitBrowserDatabase(state);
 }
 
 export async function buildSurveyBackup(surveyId: string): Promise<SurveyBackup> {
@@ -769,8 +705,8 @@ export async function buildSurveyBackup(surveyId: string): Promise<SurveyBackup>
 }
 
 export async function restoreSurveyBackup(value: unknown): Promise<string> {
-  const backup = normalizeSurveyBackup(value);
-  const state = await getDatabase();
+  const backup = parseSurveyBackupV5(value);
+  const state = await writableDatabase();
   if (backup.speciesList) {
     const restoredList = backup.speciesList.list;
     const existingList = state.speciesLists.find((list) => list.id === restoredList.id);
@@ -809,7 +745,7 @@ export async function restoreSurveyBackup(value: unknown): Promise<string> {
     ...backup.observations,
   ];
   deleteSurveyDrafts(state, backup.survey.id);
-  persist(state);
+  commitBrowserDatabase(state);
   return backup.survey.id;
 }
 
@@ -824,62 +760,6 @@ function resolveObservation(state: BrowserDatabase, observation: Observation): O
     timeZone: observation.timeOverridden ? observation.timeZone : locale.timeZone,
     position: observation.positionOverridden ? observation.position : locale.position,
   };
-}
-
-function emptyDatabase(): BrowserDatabase {
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    surveys: [],
-    locales: [],
-    observations: [],
-    speciesLists: [],
-    speciesListEntries: [],
-    settings: { defaultTaxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId },
-    achievements: [],
-    drafts: {},
-  };
-}
-
-function readCurrentDatabase(value: unknown): BrowserDatabase {
-  if (!value || typeof value !== "object") throw new Error("Ogiltig databas.");
-  const candidate = value as Record<string, unknown>;
-  if (
-    candidate.schemaVersion !== SCHEMA_VERSION ||
-    !Array.isArray(candidate.surveys) ||
-    !Array.isArray(candidate.locales) ||
-    !Array.isArray(candidate.observations) ||
-    !Array.isArray(candidate.speciesLists) ||
-    !Array.isArray(candidate.speciesListEntries) ||
-    !Array.isArray(candidate.achievements) ||
-    !candidate.settings ||
-    !candidate.drafts ||
-    typeof candidate.drafts !== "object" ||
-    Array.isArray(candidate.drafts)
-  ) {
-    throw new Error("Databasversionen stöds inte.");
-  }
-  return candidate as unknown as BrowserDatabase;
-}
-
-function deleteUnsupportedAmountData(state: BrowserDatabase): BrowserDatabase {
-  state.observations = state.observations.filter((observation) =>
-    isSupportedObservationAmount(observation.amount),
-  );
-  for (const [key, value] of Object.entries(state.drafts)) {
-    if (
-      (key.startsWith("observation:new:") || key.startsWith("observation:edit:")) &&
-      !observationDraftHasSupportedUnit(value)
-    ) {
-      delete state.drafts[key];
-    }
-  }
-  return state;
-}
-
-function observationDraftHasSupportedUnit(value: unknown): boolean {
-  if (!value || typeof value !== "object") return false;
-  const unit = (value as { unit?: unknown }).unit;
-  return unit === undefined || unit === "" || isObservationUnit(unit);
 }
 
 function deleteSurveyDrafts(state: BrowserDatabase, surveyId: string): void {
@@ -938,18 +818,6 @@ function addSpeciesToState(
 
 function speciesDisplayName(species: SpeciesSnapshot): string {
   return species.preferredName ?? species.enteredName;
-}
-
-function persist(value: BrowserDatabase): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
-  } catch (error) {
-    throw new Error(
-      error instanceof DOMException && error.name === "QuotaExceededError"
-        ? "Webbläsarens lokala lagringsutrymme är fullt. Skapa en JSON-backup."
-        : "Data kunde inte sparas i webbläsaren.",
-    );
-  }
 }
 
 function normalize(value: string): string {

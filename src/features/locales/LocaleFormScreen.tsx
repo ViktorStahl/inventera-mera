@@ -1,19 +1,19 @@
-import * as Location from "expo-location";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, StyleSheet, Switch, Text, View } from "react-native";
 
-import { rt90ToWgs84, wgs84ToRt90 } from "@/domain/coordinates";
 import type { LocaleDraft, Survey, SurveyLocale } from "@/domain/models";
 import {
-  currentTimeZone,
   localDateFromIso,
-  localDateTimeWithOffset,
   localTimeFromIso,
   timeLocal,
   todayLocal,
 } from "@/domain/time";
 import { hasErrors, validateLocaleDraft, type ValidationErrors } from "@/domain/validation";
+import {
+  captureCurrentDevicePosition,
+  DevicePositionPermissionError,
+} from "@/features/location/devicePosition";
 import { dismissToLocale, dismissToSurvey } from "@/navigation/hierarchy";
 import {
   createLocale,
@@ -33,21 +33,7 @@ import { messageOf } from "@/ui/errors";
 import { Field } from "@/ui/Field";
 import { Screen } from "@/ui/Screen";
 import { colors, spacing } from "@/ui/theme";
-
-function emptyDraft(): LocaleDraft {
-  return {
-    name: "",
-    date: todayLocal(),
-    time: timeLocal(),
-    northing: "",
-    easting: "",
-    accuracyMeters: "",
-    positionSource: "manual-rt90",
-    note: "",
-    useLocaleTimeByDefault: false,
-    useLocalePositionByDefault: false,
-  };
-}
+import { buildLocaleInput, localeToDraft, newLocaleDraft } from "./localeFormData";
 
 export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
   const { surveyId, localeId } = useLocalSearchParams<{ surveyId: string; localeId?: string }>();
@@ -81,7 +67,7 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
         setSurvey(survey);
         if (editing && !loadedLocale) throw new Error("Lokalen kunde inte hittas.");
         if (loadedLocale) setLocale(loadedLocale);
-        const baseDraft = loadedLocale ? localeToDraft(loadedLocale) : emptyDraft();
+        const baseDraft = loadedLocale ? localeToDraft(loadedLocale) : newLocaleDraft();
         setDraft(stored ? {
           ...baseDraft,
           ...stored,
@@ -121,27 +107,17 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
   async function captureLocation() {
     setLocating(true);
     try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert("Position nekades", "Du kan fortfarande skriva in RT90-koordinater manuellt.");
-        return;
-      }
-      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const rt90 = wgs84ToRt90({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      });
+      const position = await captureCurrentDevicePosition();
       setDraft((current) =>
         current
           ? {
               ...current,
-              northing: rt90.northing.toFixed(2),
-              easting: rt90.easting.toFixed(2),
-              accuracyMeters:
-                location.coords.accuracy == null ? "" : location.coords.accuracy.toFixed(1),
+              northing: position.rt90.northing.toFixed(2),
+              easting: position.rt90.easting.toFixed(2),
+              accuracyMeters: position.accuracyMeters?.toFixed(1) ?? "",
               positionSource: "device",
-              latitude: location.coords.latitude,
-              longitude: location.coords.longitude,
+              latitude: position.wgs84.latitude,
+              longitude: position.wgs84.longitude,
             }
           : current,
       );
@@ -152,10 +128,14 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
         accuracyMeters: undefined,
       }));
     } catch (error) {
-      Alert.alert(
-        "Positionen kunde inte hämtas",
-        `${messageOf(error)} Du kan skriva in RT90-koordinater manuellt.`,
-      );
+      if (error instanceof DevicePositionPermissionError) {
+        Alert.alert("Position nekades", "Du kan fortfarande skriva in RT90-koordinater manuellt.");
+      } else {
+        Alert.alert(
+          "Positionen kunde inte hämtas",
+          `${messageOf(error)} Du kan skriva in RT90-koordinater manuellt.`,
+        );
+      }
     } finally {
       setLocating(false);
     }
@@ -168,37 +148,7 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
     if (hasErrors(nextErrors)) return;
     setSaving(true);
     try {
-      const rt90 = {
-        northing: Number(draft.northing.replace(",", ".")),
-        easting: Number(draft.easting.replace(",", ".")),
-      };
-      const wgs84 =
-        draft.positionSource === "device" && draft.latitude != null && draft.longitude != null
-          ? { latitude: draft.latitude, longitude: draft.longitude }
-          : rt90ToWgs84(rt90);
-      const dateTimeUnchanged =
-        locale != null &&
-        draft.date === localDateFromIso(locale.observedAt) &&
-        draft.time === localTimeFromIso(locale.observedAt);
-      const input = {
-        surveyId,
-        name: draft.name.trim(),
-        observedAt: dateTimeUnchanged
-          ? locale.observedAt
-          : localDateTimeWithOffset(draft.date, draft.time),
-        timeZone: dateTimeUnchanged ? locale.timeZone : currentTimeZone(),
-        position: {
-          wgs84,
-          rt90: { ...rt90, crs: "EPSG:3847" as const },
-          accuracyMeters: draft.accuracyMeters.trim()
-            ? Number(draft.accuracyMeters.replace(",", "."))
-            : undefined,
-          source: draft.positionSource,
-        },
-        note: draft.note.trim() || undefined,
-        useLocaleTimeByDefault: draft.useLocaleTimeByDefault,
-        useLocalePositionByDefault: draft.useLocalePositionByDefault,
-      };
+      const input = buildLocaleInput(surveyId, draft, locale);
       const saved = editing && localeId
         ? await updateLocale(localeId, input)
         : await createLocale(input);
@@ -369,23 +319,6 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
       </View>
     </Screen>
   );
-}
-
-function localeToDraft(locale: SurveyLocale): LocaleDraft {
-  return {
-    name: locale.name,
-    date: localDateFromIso(locale.observedAt),
-    time: localTimeFromIso(locale.observedAt),
-    northing: locale.position.rt90.northing.toString(),
-    easting: locale.position.rt90.easting.toString(),
-    accuracyMeters: locale.position.accuracyMeters?.toString() ?? "",
-    positionSource: locale.position.source,
-    latitude: locale.position.wgs84.latitude,
-    longitude: locale.position.wgs84.longitude,
-    note: locale.note ?? "",
-    useLocaleTimeByDefault: locale.useLocaleTimeByDefault,
-    useLocalePositionByDefault: locale.useLocalePositionByDefault,
-  };
 }
 
 function LocaleDefaultSwitch({

@@ -41,13 +41,6 @@ describe("survey list navigation", () => {
 
   it("opens statistics from the secondary action group", async () => {
     const screen = render(<SurveyListScreen />);
-    mockUseAchievements.mockReturnValue({
-      awards: [{
-        achievementId: "first-morot",
-        achievedAt: "2026-10-11T12:00:00.000Z",
-        acknowledgedAt: null,
-      } satisfies AchievementAward],
-    });
 
     await waitFor(() => expect(listSurveys).toHaveBeenCalled());
     fireEvent.press(screen.getByRole("button", { name: "Statistik" }));
