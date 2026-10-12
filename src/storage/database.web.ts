@@ -24,6 +24,14 @@ import type {
   TaxonomyReference,
 } from "@/domain/models";
 import { speciesKey } from "@/domain/species";
+import {
+  findNewlyEligibleAchievements,
+  sortAchievementAwards,
+  type AchievementAward,
+  type AchievementId,
+  type AchievementObservation,
+  type DyntaxaTaxonMetadata,
+} from "@/domain/achievements";
 import { calculateStatisticsSummary, type StatisticsObservation, type StatisticsSummary } from "@/domain/statistics";
 import { migrateLegacyObservations, type LegacyObservation } from "./migrateLocales";
 import {
@@ -58,7 +66,7 @@ export {
 } from "./repositoryPolicy";
 
 const STORAGE_KEY = "inventera-mera:web:v1";
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 type PackagedTaxon = [
   id: string,
@@ -67,18 +75,20 @@ type PackagedTaxon = [
   synonyms: string[],
   rank: string,
   status: string,
+  familyTaxonId: string | null,
 ];
 
 const PACKAGED_TAXA = packagedTaxonomy.taxa as PackagedTaxon[];
 
 type BrowserDatabase = {
-  schemaVersion: 5;
+  schemaVersion: 6;
   surveys: Survey[];
   locales: SurveyLocale[];
   observations: Observation[];
   speciesLists: SpeciesList[];
   speciesListEntries: SpeciesListEntry[];
   settings: AppSettings;
+  achievements: AchievementAward[];
   drafts: Record<string, unknown>;
 };
 
@@ -362,6 +372,74 @@ async function updateSurveyArchiveStatus(id: string, status: Survey["status"]): 
   return updated;
 }
 
+export async function listAchievementAwards(): Promise<AchievementAward[]> {
+  const state = await getDatabase();
+  return sortAchievementAwards(state.achievements);
+}
+
+export async function evaluateAchievements(): Promise<AchievementAward[]> {
+  const state = await getDatabase();
+  const retainedSurveyIds = new Set(
+    state.surveys
+      .filter((survey) => survey.status === "active" || survey.status === "archived")
+      .map((survey) => survey.id),
+  );
+  const retainedLocales = new Map(
+    state.locales
+      .filter((locale) => retainedSurveyIds.has(locale.surveyId))
+      .map((locale) => [locale.id, locale]),
+  );
+  const observations: AchievementObservation[] = [];
+  for (const observation of state.observations) {
+    if (retainedLocales.has(observation.localeId)) {
+      observations.push({ species: observation.species });
+    }
+  }
+
+  const taxonIds = new Set(
+    observations
+      .map(({ species }) => species)
+      .filter((species) =>
+        species.source === "taxonomy" &&
+        species.taxonomyPackageId === VASCULAR_PLANTS_TAXONOMY.packageId &&
+        Boolean(species.taxonId),
+      )
+      .map((species) => species.taxonId!),
+  );
+  const taxonMetadata = new Map<string, DyntaxaTaxonMetadata>();
+  for (const [id, preferredName, , , rank, status, familyTaxonId] of PACKAGED_TAXA) {
+    if (taxonIds.has(id)) taxonMetadata.set(id, { preferredName, rank, status, familyTaxonId });
+  }
+
+  const newAchievementIds = findNewlyEligibleAchievements(
+    observations,
+    new Set(state.achievements.map((award) => award.achievementId)),
+    VASCULAR_PLANTS_TAXONOMY.packageId,
+    taxonMetadata,
+  );
+  if (newAchievementIds.length > 0) {
+    const achievedAt = new Date().toISOString();
+    for (const achievementId of newAchievementIds) {
+      state.achievements.push({ achievementId, achievedAt, acknowledgedAt: null });
+    }
+    persist(state);
+  }
+  return sortAchievementAwards(state.achievements);
+}
+
+export async function acknowledgeAchievement(achievementId: AchievementId): Promise<void> {
+  const state = await getDatabase();
+  const award = state.achievements.find((item) => item.achievementId === achievementId);
+  if (!award || award.acknowledgedAt) return;
+  award.acknowledgedAt = new Date().toISOString();
+  persist(state);
+}
+
+export async function resetAchievements(): Promise<void> {
+  const state = await getDatabase();
+  state.achievements = [];
+  persist(state);
+}
 export async function getStatisticsSummary(): Promise<StatisticsSummary> {
   const state = await getDatabase();
   const surveys = state.surveys.filter(
@@ -759,6 +837,7 @@ function emptyDatabase(): BrowserDatabase {
     speciesLists: [],
     speciesListEntries: [],
     settings: { defaultTaxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId },
+    achievements: [],
     drafts: {},
   };
 }
@@ -775,13 +854,14 @@ function readOrMigrateDatabase(value: unknown): BrowserDatabase {
       () => Crypto.randomUUID(),
     );
     return {
-      schemaVersion: 5,
+      schemaVersion: 6,
       surveys: (candidate.surveys as unknown[]).map(surveyWithoutRegion),
       locales: migrated.locales.map(localeWithObservationDefaults),
       observations: migrated.observations,
       speciesLists: [],
       speciesListEntries: [],
       settings: { defaultTaxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId },
+      achievements: [],
       drafts: {},
     };
   }
@@ -794,13 +874,14 @@ function readOrMigrateDatabase(value: unknown): BrowserDatabase {
       throw new Error("Databasversionen stöds inte.");
     }
     return {
-      schemaVersion: 5,
+      schemaVersion: 6,
       surveys: (candidate.surveys as unknown[]).map(surveyWithoutRegion),
       locales: (candidate.locales as unknown[]).map(localeWithObservationDefaults),
       observations: candidate.observations as Observation[],
       speciesLists: [],
       speciesListEntries: [],
       settings: { defaultTaxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId },
+      achievements: [],
       drafts: withoutObsoleteSurveyDrafts(
         (candidate.drafts as Record<string, unknown> | undefined) ?? {},
       ),
@@ -809,6 +890,7 @@ function readOrMigrateDatabase(value: unknown): BrowserDatabase {
   if (
     (candidate.schemaVersion !== 3 &&
       candidate.schemaVersion !== 4 &&
+      candidate.schemaVersion !== 5 &&
       candidate.schemaVersion !== SCHEMA_VERSION) ||
     !Array.isArray(candidate.surveys) ||
     !Array.isArray(candidate.locales) ||
@@ -822,7 +904,8 @@ function readOrMigrateDatabase(value: unknown): BrowserDatabase {
     throw new Error("Databasversionen stöds inte.");
   }
   const migrated = candidate as unknown as BrowserDatabase;
-  migrated.schemaVersion = 5;
+  migrated.schemaVersion = 6;
+  migrated.achievements ??= [];
   migrated.surveys = (candidate.surveys as unknown[]).map(surveyWithoutRegion);
   migrated.locales = (candidate.locales as unknown[]).map(localeWithObservationDefaults);
   migrated.drafts = withoutObsoleteSurveyDrafts(migrated.drafts);

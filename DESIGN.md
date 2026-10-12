@@ -1,7 +1,7 @@
 # Inventera mera — product and technical design
 
 Status: MVP implemented; remaining sections describe the production-capable target  
-Last updated: 2026-10-11
+Last updated: 2026-10-12
 
 Platform decision: React Native with Expo for iOS and Android, plus an Expo Web
 browser preview. Native remains the field-production target.
@@ -196,6 +196,10 @@ independent of platform views where practical.
   them; existing observations and drafts retain their explicit inheritance or
   override state. JSON backup format v5 persists both settings and restores
   older backups with both settings disabled.
+- SQLite schema v6 adds a device-local achievement ledger with detection and
+  popup-dismissal timestamps. Browser storage advances to v6 with the same state.
+  Achievement awards are global to the device, remain earned after source surveys
+  are deleted, and are not part of per-survey JSON backups.
 
 ## 3. Primary user and core journeys
 
@@ -461,7 +465,7 @@ synchronization is not part of the release.
 
 ### 5.9 Statistics
 
-- The main survey list has a secondary `Statistik` button alongside its species-list and settings actions.
+- The main survey list shows the secondary `Statistik` button alongside its species-list and settings actions only after at least one achievement has been unlocked.
 - Statistics are calculated locally from every active and archived survey.
   Permanently deleted surveys are absent because their records are cascaded away.
 - Show total observations, average observations per retained survey, observations
@@ -480,11 +484,27 @@ synchronization is not part of the release.
   statistics in a new table, call a remote analytics service, or add a chart
   dependency. Use accessible native rows/bars for the monthly trend.
 
+- Achievement checks run at app startup and immediately after a new observation is saved. They include observations in active and archived surveys; deleted surveys no longer contribute to future unlocks. A restored survey is checked on the next app start.
+- The achievement catalog is the source of truth for stable IDs, titles,
+  descriptions, and typed eligibility criteria; keep individual awards out of
+  this design document. Criteria include designated accepted species taxa,
+  total-observation thresholds, distinct accepted species, accepted Dyntaxa
+  family membership, and preferred Swedish-name prefixes. All species-based
+  criteria count unique accepted Dyntaxa taxa at species rank; prefix matching
+  ignores case but preserves Swedish diacritics. Total-observation criteria
+  count every retained observation, including free text.
+- New awards are recorded with the date detected and shown in a sequential popup queue. `Härligt!` acknowledges the current popup; any unacknowledged popup returns on the next app start.
+- The Statistics screen displays earned awards as tiles with a shared resolution-independent trophy placeholder icon, title, description, and detection date in the device's Swedish-local format. Render the same icon at about 56 dp in tiles and 80 dp in popups.
+- `Återställ prestationer` confirms before clearing awards and pending popups. Existing observations may unlock awards again at the next startup or after the next newly saved observation; reset does not immediately re-evaluate.
+
 ## 6. Domain model
 
-All IDs are client-generated UUID v4 values. All records include `createdAt`,
-`updatedAt`, and `schemaVersion`. Timestamps are ISO 8601 strings. Mutations run
-inside SQLite transactions with foreign-key enforcement enabled.
+Survey, locale, observation, and species-list records use client-generated UUID
+v4 IDs; achievement IDs are stable keys from the achievement catalog. Field
+records include creation/update timestamps and schema versions; achievement
+awards store detection and popup-dismissal timestamps. Timestamps are ISO 8601
+strings. Mutations run inside SQLite transactions with foreign-key enforcement
+enabled.
 
 ### 6.1 Survey
 
@@ -614,6 +634,7 @@ type TaxonSearchEntry = {
   scientificName: string;
   synonyms: string[];
   rank?: string;
+  familyTaxonId?: string | null;
   parentTaxonId?: string;
   status?: string;
   normalizedSearchText: string;
@@ -719,7 +740,8 @@ The build job must:
 
 1. Download the official archive/API data under its current terms.
 2. Select the target taxonomic subtree and supported ranks/statuses.
-3. Normalize the minimal search fields and preserve source IDs.
+3. Normalize the minimal search fields, preserve source IDs, and include each
+   accepted entry's accepted family taxon ID where available.
 4. Produce a versioned SQLite package with FTS5 search tables, a compact web
    equivalent, and a small manifest with record count, source date,
    licence/citation, and SHA-256 checksums.

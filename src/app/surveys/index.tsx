@@ -17,6 +17,7 @@ import type { SurveyListItem } from "@/domain/models";
 import { readJsonFile } from "@/export/files";
 import { listSurveys, restoreSurveyBackup } from "@/storage/database";
 import { Button } from "@/ui/Button";
+import { useAchievements } from "@/features/achievements/AchievementProvider";
 import { messageOf } from "@/ui/errors";
 import { Card } from "@/ui/Card";
 import { ConnectionBadge } from "@/ui/ConnectionBadge";
@@ -26,6 +27,7 @@ import { floatingActionLayout } from "@/ui/floatingActionLayout";
 import { colors, spacing } from "@/ui/theme";
 
 export default function SurveyListScreen() {
+  const { awards } = useAchievements();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [showArchived, setShowArchived] = useState(false);
@@ -151,11 +153,13 @@ export default function SurveyListScreen() {
               variant="secondary"
               onPress={() => router.push("/settings" as Href)}
             />
-            <Button
-              label="Statistik"
-              variant="secondary"
-              onPress={() => router.push("/statistics" as Href)}
-            />
+            {awards.length > 0 ? (
+              <Button
+                label="Statistik"
+                variant="secondary"
+                onPress={() => router.push("/statistics" as Href)}
+              />
+            ) : null}
             <Button
               label="Återställ JSON-backup"
               variant="secondary"

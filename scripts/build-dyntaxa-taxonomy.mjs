@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { strFromU8, unzipSync } from "fflate";
 
 const ROOT_TAXON_ID = "urn:lsid:dyntaxa.se:Taxon:6000506";
+const ORCHIDACEAE_TAXON_ID = "urn:lsid:dyntaxa.se:Taxon:2002692";
 const PACKAGE_ID = "vascular-plants-starter"; // Stable legacy ID; do not break saved surveys.
 const SOURCE_ARCHIVE = resolve("dyntaxa-raw/dyntaxa-dwca.zip");
 const DATABASE_OUTPUT = resolve("assets/taxonomies/dyntaxa-vascular-plants.db");
@@ -53,6 +54,10 @@ if (!root || root.scientificName !== "Tracheophyta" || root.taxonRank !== "phylu
 }
 
 const descendantMemo = new Map([[ROOT_TAXON_ID, true]]);
+const orchidFamily = acceptedById.get(ORCHIDACEAE_TAXON_ID);
+if (!orchidFamily || orchidFamily.taxonRank !== "family") {
+  throw new Error(`Expected ${ORCHIDACEAE_TAXON_ID} to be the accepted Orchidaceae family.`);
+}
 function isDescendantOfVascularPlants(taxonId) {
   if (descendantMemo.has(taxonId)) return descendantMemo.get(taxonId);
   const visited = [];
@@ -65,6 +70,20 @@ function isDescendantOfVascularPlants(taxonId) {
   const result = descendantMemo.get(currentId) === true;
   for (const visitedId of visited) descendantMemo.set(visitedId, result);
   return result;
+}
+
+function findFamilyTaxonId(taxonId) {
+  let currentId = taxonId;
+  const visited = new Set();
+  while (currentId) {
+    if (visited.has(currentId)) throw new Error(`Taxonomy cycle detected at ${currentId}.`);
+    visited.add(currentId);
+    const current = acceptedById.get(currentId);
+    if (!current) return null;
+    if (current.taxonRank === "family") return current.taxonId;
+    currentId = current.parentNameUsageID;
+  }
+  return null;
 }
 
 const selectedRows = [...acceptedById.values()].filter(
@@ -118,6 +137,7 @@ const taxa = selectedRows.map((row) => {
     uniqueSorted(aliases, [preferredName, row.scientificName]),
     row.taxonRank === "species" ? "art" : "underart",
     row.taxonomicStatus,
+    findFamilyTaxonId(row.taxonId),
   ];
 });
 taxa.sort(
@@ -170,6 +190,7 @@ try {
       synonyms,
       taxon_rank UNINDEXED,
       status UNINDEXED,
+      family_taxon_id UNINDEXED,
       tokenize = 'unicode61 remove_diacritics 2'
     );
   `);
@@ -179,17 +200,18 @@ try {
   for (const [key, value] of [
     ["packageId", PACKAGE_ID],
     ["version", version],
+    ["formatVersion", "2"],
     ["rootTaxonId", ROOT_TAXON_ID],
     ["entryCount", String(taxa.length)],
     ["sourceArchiveSha256", archiveSha256],
   ]) insertManifest.run(key, value);
   const insertTaxon = taxonomyDatabase.prepare(`INSERT INTO taxon_search
-    (id, preferred_name, scientific_name, synonyms, taxon_rank, status)
-    VALUES (?, ?, ?, ?, ?, ?)`);
+    (id, preferred_name, scientific_name, synonyms, taxon_rank, status, family_taxon_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`);
   taxonomyDatabase.exec("BEGIN IMMEDIATE;");
   try {
     for (const taxon of taxa) {
-      insertTaxon.run(taxon[0], taxon[1], taxon[2], taxon[3].join(" | "), taxon[4], taxon[5]);
+      insertTaxon.run(taxon[0], taxon[1], taxon[2], taxon[3].join(" | "), taxon[4], taxon[5], taxon[6]);
     }
     taxonomyDatabase.exec("COMMIT;");
   } catch (error) {
@@ -207,9 +229,9 @@ try {
 }
 
 progress("Writing web taxonomy package");
-writeFileSync(WEB_OUTPUT, `${JSON.stringify({ formatVersion: 1, taxa })}\n`);
+writeFileSync(WEB_OUTPUT, `${JSON.stringify({ formatVersion: 2, taxa })}\n`);
 const manifest = {
-  formatVersion: 1,
+  formatVersion: 2,
   packageId: PACKAGE_ID,
   name: "Kärlväxter (Dyntaxa)",
   version,

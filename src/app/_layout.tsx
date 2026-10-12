@@ -2,6 +2,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 
 import { DatabaseProvider } from "@/storage/DatabaseProvider";
+import { AchievementProvider } from "@/features/achievements/AchievementProvider";
 import { AppKeyboardProvider } from "@/ui/AppKeyboardProvider";
 import { colors } from "@/ui/theme";
 
@@ -9,16 +10,17 @@ export default function RootLayout() {
   return (
     <AppKeyboardProvider>
       <DatabaseProvider>
-        <StatusBar style="light" />
-        <Stack
-          screenOptions={{
-            headerStyle: { backgroundColor: colors.green800 },
-            headerTintColor: "#FFFFFF",
-            headerTitleStyle: { fontWeight: "700" },
-            headerBackButtonDisplayMode: "minimal",
-            contentStyle: { backgroundColor: colors.background },
-          }}
-        >
+        <AchievementProvider>
+          <StatusBar style="light" />
+          <Stack
+            screenOptions={{
+              headerStyle: { backgroundColor: colors.green800 },
+              headerTintColor: "#FFFFFF",
+              headerTitleStyle: { fontWeight: "700" },
+              headerBackButtonDisplayMode: "minimal",
+              contentStyle: { backgroundColor: colors.background },
+            }}
+          >
             <Stack.Screen name="index" options={{ headerShown: false }} />
             <Stack.Screen name="surveys/index" options={{ title: "Inventeringar" }} />
             <Stack.Screen name="statistics" options={{ title: "Statistik" }} />
@@ -58,7 +60,8 @@ export default function RootLayout() {
               name="surveys/[surveyId]/observations/[observationId]"
               options={{ title: "Redigera observation", presentation: "modal" }}
             />
-        </Stack>
+          </Stack>
+        </AchievementProvider>
       </DatabaseProvider>
     </AppKeyboardProvider>
   );

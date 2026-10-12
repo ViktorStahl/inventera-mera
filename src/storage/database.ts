@@ -28,6 +28,14 @@ import type {
   TaxonomyReference,
 } from "@/domain/models";
 import { speciesKey } from "@/domain/species";
+import {
+  findNewlyEligibleAchievements,
+  sortAchievementAwards,
+  type AchievementAward,
+  type AchievementId,
+  type AchievementObservation,
+  type DyntaxaTaxonMetadata,
+} from "@/domain/achievements";
 import { calculateStatisticsSummary, type StatisticsObservation, type StatisticsSummary } from "@/domain/statistics";
 import { migrateLegacyObservations, type LegacyObservation } from "./migrateLocales";
 import {
@@ -61,8 +69,8 @@ export {
 } from "./repositoryPolicy";
 
 const DATABASE_NAME = "inventera-mera.db";
-const SCHEMA_VERSION = 5;
-const TAXONOMY_DATABASE_NAME = `dyntaxa-vascular-plants-${taxonomyManifest.version}.db`;
+const SCHEMA_VERSION = 6;
+const TAXONOMY_DATABASE_NAME = `dyntaxa-vascular-plants-${taxonomyManifest.version}-v${taxonomyManifest.formatVersion}.db`;
 const TAXONOMY_DATABASE_ASSET = require(
   "../../assets/taxonomies/dyntaxa-vascular-plants.db",
 ) as number;
@@ -92,6 +100,7 @@ async function openAndMigrate(): Promise<SQLite.SQLiteDatabase> {
   if (version < 3) await migrateToVersionThree(database);
   if (version < 4) await migrateToVersionFour(database);
   if (version < 5) await migrateToVersionFive(database);
+  if (version < 6) await migrateToVersionSix(database);
   await deleteUnsupportedAmountData(database);
   return database;
 }
@@ -146,6 +155,7 @@ async function openTaxonomyDatabase(): Promise<SQLite.SQLiteDatabase> {
   if (
     installedManifest.packageId !== taxonomyManifest.packageId ||
     installedManifest.version !== taxonomyManifest.version ||
+    installedManifest.formatVersion !== String(taxonomyManifest.formatVersion) ||
     installedManifest.entryCount !== String(taxonomyManifest.entryCount)
   ) {
     await database.closeAsync();
@@ -388,6 +398,124 @@ async function migrateToVersionFive(database: SQLite.SQLiteDatabase): Promise<vo
   });
 }
 
+async function migrateToVersionSix(database: SQLite.SQLiteDatabase): Promise<void> {
+  await database.withTransactionAsync(async () => {
+    await database.execAsync(`
+      CREATE TABLE achievements (
+        achievement_id TEXT PRIMARY KEY NOT NULL,
+        achieved_at TEXT NOT NULL,
+        acknowledged_at TEXT
+      );
+      PRAGMA user_version = 6;
+    `);
+  });
+}
+
+export async function listAchievementAwards(): Promise<AchievementAward[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<{
+    achievement_id: AchievementId;
+    achieved_at: string;
+    acknowledged_at: string | null;
+  }>("SELECT achievement_id, achieved_at, acknowledged_at FROM achievements");
+  return sortAchievementAwards(rows.map((row) => ({
+    achievementId: row.achievement_id,
+    achievedAt: row.achieved_at,
+    acknowledgedAt: row.acknowledged_at,
+  })));
+}
+
+export async function evaluateAchievements(): Promise<AchievementAward[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<{ species_json: string }>(
+    "SELECT observations.species_json FROM observations " +
+      "JOIN locales ON locales.id = observations.locale_id " +
+      "JOIN surveys ON surveys.id = locales.survey_id " +
+      "WHERE surveys.status IN ('active', 'archived')",
+  );
+  const observations: AchievementObservation[] = rows.map((row) => ({
+    species: JSON.parse(row.species_json) as Observation["species"],
+  }));
+  const taxonIds = new Set<string>();
+  for (const observation of observations) {
+    const species = observation.species;
+    if (
+      species.source === "taxonomy" &&
+      species.taxonomyPackageId === VASCULAR_PLANTS_TAXONOMY.packageId &&
+      species.taxonId
+    ) taxonIds.add(species.taxonId);
+  }
+
+  const taxonMetadata = await loadDyntaxaTaxonMetadata(taxonIds);
+  const unlocked = await listAchievementAwards();
+  const newAchievementIds = findNewlyEligibleAchievements(
+    observations,
+    new Set(unlocked.map((award) => award.achievementId)),
+    VASCULAR_PLANTS_TAXONOMY.packageId,
+    taxonMetadata,
+  );
+  if (newAchievementIds.length > 0) {
+    const achievedAt = new Date().toISOString();
+    await database.withTransactionAsync(async () => {
+      for (const achievementId of newAchievementIds) {
+        await database.runAsync(
+          "INSERT OR IGNORE INTO achievements(achievement_id, achieved_at, acknowledged_at) VALUES (?, ?, NULL)",
+          achievementId,
+          achievedAt,
+        );
+      }
+    });
+  }
+  return listAchievementAwards();
+}
+
+export async function acknowledgeAchievement(achievementId: AchievementId): Promise<void> {
+  const database = await getDatabase();
+  await database.runAsync(
+    "UPDATE achievements SET acknowledged_at = ? WHERE achievement_id = ? AND acknowledged_at IS NULL",
+    new Date().toISOString(),
+    achievementId,
+  );
+}
+
+export async function resetAchievements(): Promise<void> {
+  const database = await getDatabase();
+  await database.runAsync("DELETE FROM achievements");
+}
+
+async function loadDyntaxaTaxonMetadata(
+  taxonIds: ReadonlySet<string>,
+): Promise<Map<string, DyntaxaTaxonMetadata>> {
+  const metadata = new Map<string, DyntaxaTaxonMetadata>();
+  if (taxonIds.size === 0) return metadata;
+
+  const taxonomyDatabase = await getTaxonomyDatabase();
+  const ids = [...taxonIds];
+  for (let offset = 0; offset < ids.length; offset += 400) {
+    const chunk = ids.slice(offset, offset + 400);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const rows = await taxonomyDatabase.getAllAsync<{
+      id: string;
+      preferred_name: string;
+      taxon_rank: string;
+      status: string;
+      family_taxon_id: string | null;
+    }>(
+      `SELECT id, preferred_name, taxon_rank, status, family_taxon_id
+       FROM taxon_search WHERE id IN (${placeholders})`,
+      ...chunk,
+    );
+    for (const row of rows) {
+      metadata.set(row.id, {
+        preferredName: row.preferred_name,
+        rank: row.taxon_rank,
+        status: row.status,
+        familyTaxonId: row.family_taxon_id,
+      });
+    }
+  }
+  return metadata;
+}
 export async function getAppSettings(): Promise<AppSettings> {
   const database = await getDatabase();
   const row = await database.getFirstAsync<{ default_taxonomy_package_id: string }>(

@@ -1,3 +1,3 @@
-export function confirmDestructive(title: string, message: string): Promise<boolean> {
+export function confirmDestructive(title: string, message: string, _confirmLabel = "Radera"): Promise<boolean> {
   return Promise.resolve(globalThis.confirm(`${title}\n\n${message}`));
 }

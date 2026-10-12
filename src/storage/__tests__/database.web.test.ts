@@ -61,7 +61,7 @@ describe("browser storage", () => {
     }));
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
     const migratedDatabase = await repository.getDatabase();
-    expect(migratedDatabase.schemaVersion).toBe(5);
+    expect(migratedDatabase.schemaVersion).toBe(6);
     expect(migratedDatabase.surveys[0]).not.toHaveProperty("region");
     expect(migratedDatabase.locales[0]).toMatchObject({
       useLocaleTimeByDefault: false,
@@ -455,5 +455,99 @@ describe("browser storage", () => {
     expect(afterDeletion.surveyCount).toBe(before.surveyCount + 2);
     expect(afterDeletion.topSpecies.some((species) => species.name === "Daggkåpa")).toBe(false);
     expect(await repository.getSurvey(emptySurvey.id)).not.toBeNull();
+  });
+  it("persists Morot awards through reset, survey deletion, and browser reload", async () => {
+    jest.resetModules();
+    const browserRepository = jest.requireActual("../database.web") as typeof import("../database.web");
+    const storage = new MemoryStorage();
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    storage.setItem("inventera-mera:web:v1", JSON.stringify({
+      schemaVersion: 5,
+      surveys: [],
+      locales: [],
+      observations: [],
+      speciesLists: [],
+      speciesListEntries: [],
+      settings: { defaultTaxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId },
+      drafts: {},
+    }));
+    const migratedDatabase = await browserRepository.getDatabase();
+    expect(migratedDatabase.schemaVersion).toBe(6);
+    expect(migratedDatabase.achievements).toEqual([]);
+
+    const survey = await browserRepository.createSurvey({
+      title: "Morotsinventering",
+      description: "",
+      surveyDate: "2026-10-11",
+      taxonomyPackageId: VASCULAR_PLANTS_TAXONOMY.packageId,
+      speciesListId: "",
+    });
+    const locale = await browserRepository.createLocale({
+      surveyId: survey.id,
+      name: "Testlokal",
+      observedAt: "2026-10-11T10:00:00+02:00",
+      timeZone: "Europe/Stockholm",
+      position: {
+        wgs84: { latitude: 57.7, longitude: 11.9 },
+        rt90: { northing: 6400000, easting: 1300000, crs: "EPSG:3847" },
+        source: "manual-rt90",
+      },
+      useLocaleTimeByDefault: false,
+      useLocalePositionByDefault: false,
+    });
+    const morot = (await browserRepository.searchTaxa("morot"))
+      .find((taxon) => taxon.id === "urn:lsid:dyntaxa.se:Taxon:219664");
+    expect(morot).toBeDefined();
+    const observation: Omit<Observation, "id" | "createdAt" | "updatedAt"> = {
+      surveyId: survey.id,
+      localeId: locale.id,
+      observedAt: locale.observedAt,
+      timeZone: locale.timeZone,
+      localityName: locale.name,
+      position: locale.position,
+      timeOverridden: false,
+      positionOverridden: false,
+      species: taxonomySpeciesSnapshot(morot!, VASCULAR_PLANTS_TAXONOMY),
+      additionalObservers: [],
+    };
+    await browserRepository.createObservation(observation);
+    const meadowTaxa = (await browserRepository.searchTaxa("äng", 500))
+      .filter((taxon) =>
+        taxon.rank === "art" &&
+        taxon.preferredName.toLocaleLowerCase("sv-SE").startsWith("äng"),
+      )
+      .slice(0, 20);
+    expect(meadowTaxa).toHaveLength(20);
+    for (const taxon of meadowTaxa) {
+      await browserRepository.createObservation({
+        ...observation,
+        species: taxonomySpeciesSnapshot(taxon, VASCULAR_PLANTS_TAXONOMY),
+      });
+    }
+    await browserRepository.archiveSurvey(survey.id);
+
+    expect((await browserRepository.evaluateAchievements()).map((award) => award.achievementId))
+      .toEqual(["first-morot", "meadow-prefix-expert"]);
+    await browserRepository.acknowledgeAchievement("first-morot");
+    expect((await browserRepository.listAchievementAwards())[0]?.acknowledgedAt).toEqual(expect.any(String));
+
+    await browserRepository.resetAchievements();
+    expect(await browserRepository.listAchievementAwards()).toEqual([]);
+    expect((await browserRepository.evaluateAchievements()).map((award) => award.achievementId))
+      .toEqual(["first-morot", "meadow-prefix-expert"]);
+
+    const backup = await browserRepository.buildSurveyBackup(survey.id);
+    expect(backup).not.toHaveProperty("achievements");
+    await browserRepository.deleteSurvey(survey.id);
+    expect((await browserRepository.listAchievementAwards()).map((award) => award.achievementId))
+      .toEqual(["first-morot", "meadow-prefix-expert"]);
+
+    jest.resetModules();
+    const reloadedRepository = jest.requireActual("../database.web") as typeof import("../database.web");
+    expect((await reloadedRepository.listAchievementAwards()).map((award) => award.achievementId))
+      .toEqual(["first-morot", "meadow-prefix-expert"]);
+    await reloadedRepository.resetAchievements();
+    expect(await reloadedRepository.evaluateAchievements()).toEqual([]);
+    expect(await reloadedRepository.listAchievementAwards()).toEqual([]);
   });
 });

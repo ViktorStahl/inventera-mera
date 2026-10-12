@@ -29,6 +29,7 @@ import {
   validateObservationDraft,
   type ValidationErrors,
 } from "@/domain/validation";
+import { useAchievements } from "@/features/achievements/AchievementProvider";
 import { SpeciesPicker } from "@/features/taxonomy/SpeciesPicker";
 import { AmountUnitPicker } from "./AmountUnitPicker";
 import {
@@ -70,6 +71,7 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
   }>();
   const { surveyId, observationId } = params;
   const router = useRouter();
+  const { evaluate: evaluateAchievements } = useAchievements();
   const [survey, setSurvey] = useState<Survey>();
   const [locale, setLocale] = useState<SurveyLocale>();
   const [speciesList, setSpeciesList] = useState<SpeciesList>();
@@ -368,8 +370,12 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
         additionalObservers: parseAdditionalObservers(draft.additionalObservers),
       };
       const addToListId = draft.addToSpeciesList ? speciesList?.id : undefined;
-      if (editing && observationId) await updateObservation(observationId, input, addToListId);
-      else await createObservation(input, addToListId);
+      if (editing && observationId) {
+        await updateObservation(observationId, input, addToListId);
+      } else {
+        await createObservation(input, addToListId);
+        await evaluateAchievements().catch(() => undefined);
+      }
       dismissToLocale(router, surveyId, locale.id);
     } catch (error) {
       Alert.alert("Observationen kunde inte sparas", messageOf(error));

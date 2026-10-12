@@ -3,10 +3,18 @@ import { useCallback, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
 import { getRecentMonthlyCounts } from "@/domain/statistics";
+import { ACHIEVEMENT_DEFINITIONS } from "@/domain/achievements";
 import type { MonthlyObservationCount, StatisticsSummary } from "@/domain/statistics";
 import { getStatisticsSummary } from "@/storage/database";
+import {
+  AchievementIcon,
+  AchievementTitle,
+  formatAchievementDate,
+  useAchievements,
+} from "@/features/achievements/AchievementProvider";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
+import { confirmDestructive } from "@/ui/confirm";
 import { EmptyState } from "@/ui/EmptyState";
 import { messageOf } from "@/ui/errors";
 import { Screen } from "@/ui/Screen";
@@ -16,9 +24,12 @@ const countFormatter = new Intl.NumberFormat("sv-SE", { maximumFractionDigits: 0
 const averageFormatter = new Intl.NumberFormat("sv-SE", { maximumFractionDigits: 1 });
 
 export default function StatisticsScreen() {
+  const { awards, reset } = useAchievements();
   const [summary, setSummary] = useState<StatisticsSummary>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState<string>();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -38,6 +49,24 @@ export default function StatisticsScreen() {
     }, [load]),
   );
 
+  async function resetAchievementHistory() {
+    const confirmed = await confirmDestructive(
+      "Återställ prestationer?",
+      "Alla upplåsta prestationer och väntande meddelanden tas bort. Befintliga observationer kan låsa upp dem igen vid nästa appstart eller när en ny observation sparas.",
+      "Återställ",
+    );
+    if (!confirmed) return;
+
+    setResetting(true);
+    setResetError(undefined);
+    try {
+      await reset();
+    } catch (resetFailure) {
+      setResetError(messageOf(resetFailure));
+    } finally {
+      setResetting(false);
+    }
+  }
   const recentMonths = getRecentMonthlyCounts(summary?.observationsByMonth ?? []);
   const maximumMonthlyCount = maxMonthlyCount(recentMonths);
   const hasRecentObservations = recentMonths.some((month) => month.observationCount > 0);
@@ -117,6 +146,46 @@ export default function StatisticsScreen() {
         </>
       ) : null}
 
+      <View style={styles.achievementsSection}>
+        <Text accessibilityRole="header" style={styles.sectionTitle}>Prestationer</Text>
+        {awards.length > 0 ? (
+          <Button
+            label="Återställ prestationer"
+            variant="danger"
+            loading={resetting}
+            onPress={() => void resetAchievementHistory()}
+          />
+        ) : null}
+        {resetError ? <Text style={styles.resetError}>{resetError}</Text> : null}
+        {awards.length === 0 ? (
+          <Text style={styles.emptyText}>Inga prestationer ännu. Fortsätt inventera för att låsa upp dem.</Text>
+        ) : (
+          awards.map((award) => {
+            const definition = ACHIEVEMENT_DEFINITIONS.find(
+              (item) => item.id === award.achievementId,
+            );
+            if (!definition) return null;
+            return (
+              <Card key={award.achievementId}>
+                <View style={styles.achievementTile}>
+                  <AchievementIcon size={56} />
+                  <View style={styles.achievementText}>
+                    <AchievementTitle
+                      achievementId={award.achievementId}
+                      style={styles.achievementTitle}
+                    />
+
+                    <Text style={styles.achievementDescription}>{definition.description}</Text>
+                    <Text style={styles.achievementDate}>
+                      Uppnådd {formatAchievementDate(award.achievedAt)}
+                    </Text>
+                  </View>
+                </View>
+              </Card>
+            );
+          })
+        )}
+      </View>
       {!loading && !error && summary?.surveyCount === 0 ? (
         <EmptyState title="Ingen statistik ännu" body="Skapa en inventering för att börja samla observationer." />
       ) : null}
@@ -248,6 +317,13 @@ const styles = StyleSheet.create({
   speciesRank: { color: colors.green800, fontWeight: "700", width: 24 },
   speciesName: { color: colors.text, flex: 1 },
   speciesCount: { color: colors.text, fontWeight: "700", minWidth: 32, textAlign: "right" },
+  achievementsSection: { gap: spacing.sm },
+  achievementTile: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  achievementText: { flex: 1, gap: spacing.xs },
+  achievementTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
+  achievementDescription: { color: colors.textMuted, lineHeight: 19 },
+  achievementDate: { color: colors.green800, fontSize: 13, fontWeight: "600" },
+  resetError: { color: colors.danger, lineHeight: 20 },
   errorTitle: { color: colors.danger, fontWeight: "700" },
   body: { color: colors.text, lineHeight: 20 },
 });

@@ -1,5 +1,5 @@
 {
-  "formatVersion": 1,
+  "formatVersion": 2,
   "packageId": "vascular-plants-starter",
   "name": "Kärlväxter (Dyntaxa)",
   "version": "2026-06-18-dwca",
@@ -26,5 +26,5 @@
   "synonymCount": 13740,
   "multiplePreferredSwedishNames": 0,
   "databaseFile": "dyntaxa-vascular-plants.db",
-  "databaseSha256": "f2e5f4189e1e83004ab29f38faaabe419a5e4a53f82b4e2bbcd8a53d48d2857b"
+  "databaseSha256": "569d96074b22db5ce8c8820379bc6d3304dd649b055d1750e787a39bc79ebc0d"
 }
