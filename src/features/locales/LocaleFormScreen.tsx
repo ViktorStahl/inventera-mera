@@ -14,6 +14,7 @@ import {
   captureCurrentDevicePosition,
   DevicePositionPermissionError,
 } from "@/features/location/devicePosition";
+import { PositionAccuracyField } from "@/features/location/PositionAccuracyField";
 import { dismissToLocale, dismissToSurvey } from "@/navigation/hierarchy";
 import {
   createLocale,
@@ -230,13 +231,9 @@ export function LocaleFormScreen({ editing = false }: { editing?: boolean }) {
           />
         </View>
       </View>
-      <Field
-        label="Noggrannhet i meter (valfri)"
+      <PositionAccuracyField
         value={draft.accuracyMeters}
         onChangeText={(value) => update("accuracyMeters", value)}
-        keyboardType="decimal-pad"
-        editable={draft.positionSource !== "device"}
-        hint={draft.positionSource === "device" ? "Rapporterad av enhetens positionstjänst." : undefined}
         error={errors.accuracyMeters}
       />
       <Button

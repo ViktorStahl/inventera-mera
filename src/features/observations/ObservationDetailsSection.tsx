@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { ObservationDraft } from "@/domain/models";
 import type { ValidationErrors } from "@/domain/validation";
+import { PositionAccuracyField } from "@/features/location/PositionAccuracyField";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
 import { Field } from "@/ui/Field";
@@ -121,13 +122,9 @@ export function ObservationDetailsAccordion({
               />
             </View>
           </View>
-          <Field
-            label="Noggrannhet i meter (valfri)"
+          <PositionAccuracyField
             value={draft.accuracyMeters}
             onChangeText={onAccuracyChange}
-            keyboardType="decimal-pad"
-            editable={draft.positionSource !== "device"}
-            hint={draft.positionSource === "device" ? "Rapporterad av enhetens positionstjänst." : undefined}
             error={errors.accuracyMeters}
           />
           <View style={styles.twoColumns}>
