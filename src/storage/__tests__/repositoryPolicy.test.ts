@@ -2,7 +2,7 @@ import type { SpeciesList, SurveyLocale } from "@/domain/models";
 import {
   localeDraftKey,
   localeEditDraftKey,
-  parseSurveyBackupV5,
+  parseSurveyBackup,
   normalizeSpeciesForList,
   observationDraftKey,
   observationEditDraftKey,
@@ -55,15 +55,15 @@ describe("shared repository policy", () => {
       observations: [],
     };
 
-    expect(() => parseSurveyBackupV5({
+    expect(() => parseSurveyBackup({
       ...backup,
       survey: { ...backup.survey, status: "unknown" },
     })).toThrow("ogiltig inventering");
-    expect(() => parseSurveyBackupV5({
+    expect(() => parseSurveyBackup({
       ...backup,
       locales: [{ ...locale, position: { latitude: 57.7, longitude: 11.9 } }],
     })).toThrow("ogiltig lokal");
-    expect(() => parseSurveyBackupV5({
+    expect(() => parseSurveyBackup({
       ...backup,
       locales: [{ ...locale, surveyId: "survey-2" }],
     })).toThrow("annan inventering");

@@ -24,6 +24,7 @@ const validDraft: ObservationDraft = {
   date: "2026-07-31",
   time: "10:14",
   timeOverridden: false,
+  identificationUncertain: false,
   northing: "6400000",
   easting: "1300000",
   accuracyMeters: "4.5",

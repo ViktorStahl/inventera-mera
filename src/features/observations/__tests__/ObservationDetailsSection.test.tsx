@@ -12,6 +12,7 @@ const inheritedDraft: ObservationDraft = {
   date: "2026-08-12",
   time: "09:15",
   timeOverridden: false,
+  identificationUncertain: false,
   northing: "6166984",
   easting: "1322751",
   accuracyMeters: "5",

@@ -61,6 +61,7 @@ export type Observation = {
   position: Position;
   timeOverridden: boolean;
   positionOverridden: boolean;
+  identificationUncertain: boolean;
   species: SpeciesSnapshot;
   amount?: ObservationAmount;
   publicComment?: string;
@@ -136,6 +137,7 @@ export type ObservationDraft = {
   date: string;
   time: string;
   timeOverridden: boolean;
+  identificationUncertain: boolean;
   northing: string;
   easting: string;
   accuracyMeters: string;
@@ -154,7 +156,7 @@ export type ObservationDraft = {
 
 export type SurveyBackup = {
   format: "inventera-mera-backup";
-  formatVersion: 5;
+  formatVersion: 6;
   exportedAt: string;
   survey: Survey;
   locales: SurveyLocale[];

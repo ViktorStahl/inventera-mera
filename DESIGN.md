@@ -35,10 +35,11 @@ and conflict-resolution design.
 - Archived surveys are readable and exportable but cannot be edited. Permanent
   deletion is available only after archive, requires confirmation, and removes
   dependent records and drafts.
-- Native/browser schema v6 and JSON backup format v5 are the only supported
-  formats. Older formats are not migrated or silently cleared; newer databases
-  are rejected. Recover old data by exporting a v5 backup with a compatible app
-  before resetting local storage.
+- Native/browser schema v7 and JSON backup format v6 are current. Upgrade
+  schema v6 in place, defaulting uncertain identification to false. Accept JSON
+  backup v5 with the same default and export backups as v6. Database schemas
+  older than v6 and backups older than v5 remain unsupported; newer databases
+  are rejected.
 
 ### Species and taxonomy
 
@@ -109,6 +110,7 @@ exactly these columns in this order:
 | `Biotop-beskrivning` | Owning locale's note |
 | `Publik kommentar` | Public comment |
 | `Med-observatör` | Additional observers joined with `; ` |
+| `Osäker artbestämning` | `X` when identification is uncertain; blank otherwise |
 
 `Antal` and `Enhet` always appear together and are both blank when amount is
 absent. Accuracy classes in metres are `1`, `5`, `10`, `25`, `50`, `75`, `100`,
@@ -124,8 +126,8 @@ WGS84 coordinates. Include ISO 8601 time and species name, public comment in
 details in the description. Escape XML and omit invalid control characters.
 
 JSON is the lossless transfer format and preserves survey, locale, observation,
-species-list, coordinate, accuracy, and inheritance data. Exports never upload
-or mutate records.
+species-list, coordinate, accuracy, inheritance, and uncertain-identification
+data. Exports never upload or mutate records.
 
 ## Privacy, accessibility, and quality
 

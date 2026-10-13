@@ -36,7 +36,7 @@ import {
   localeEditDraftKey,
   localeEditDraftPrefix,
   normalizeSpeciesForList,
-  parseSurveyBackupV5,
+  parseSurveyBackup,
   observationDraftKey,
   observationDraftPrefix,
   observationEditDraftKey,
@@ -693,7 +693,7 @@ export async function buildSurveyBackup(surveyId: string): Promise<SurveyBackup>
   const speciesList = survey.speciesListId ? await getSpeciesList(survey.speciesListId) : null;
   return {
     format: "inventera-mera-backup",
-    formatVersion: 5,
+    formatVersion: 6,
     exportedAt: new Date().toISOString(),
     survey,
     locales: (await listLocales(surveyId)).map(({ observationCount: _, ...locale }) => locale),
@@ -705,7 +705,7 @@ export async function buildSurveyBackup(surveyId: string): Promise<SurveyBackup>
 }
 
 export async function restoreSurveyBackup(value: unknown): Promise<string> {
-  const backup = parseSurveyBackupV5(value);
+  const backup = parseSurveyBackup(value);
   const state = await writableDatabase();
   if (backup.speciesList) {
     const restoredList = backup.speciesList.list;

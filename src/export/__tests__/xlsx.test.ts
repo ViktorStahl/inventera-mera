@@ -51,6 +51,7 @@ const observation: Observation = {
   localityName: locale.name,
   timeOverridden: true,
   positionOverridden: false,
+  identificationUncertain: false,
   position: locale.position,
   species: { source: "free-text", enteredName: "=Farlig formel" },
   publicComment: "Publik kommentar",
@@ -81,6 +82,7 @@ describe("Excel export", () => {
       "Fuktig äng",
       "Publik kommentar",
       "Ada; Bo",
+      "",
     ]);
     expect(workbook.sheetXml).toContain('<c r="G2" s="2"><v>46234</v></c>');
     expect(workbook.sheetXml).toContain(`<c r="H2" s="3"><v>${(10 * 60 + 14) / (24 * 60)}</v></c>`);
@@ -139,6 +141,16 @@ describe("Excel export", () => {
     ]);
   });
 
+  it("appends the uncertainty column and marks uncertain identifications with X", () => {
+    const uncertain = { ...observation, identificationUncertain: true };
+    const workbook = readWorkbook([uncertain]);
+    const certainWorkbook = readWorkbook([observation]);
+
+    expect(ARTPORTALEN_HEADERS.at(-1)).toBe("Osäker artbestämning");
+    expect(readRow(workbook.sheetXml, workbook.sharedStrings, 2).at(-1)).toBe("X");
+    expect(readRow(certainWorkbook.sheetXml, certainWorkbook.sharedStrings, 2).at(-1)).toBe("");
+  });
+
   it("writes missing optional values as blank cells", () => {
     const withoutOptionals: Observation = {
       ...observation,
@@ -158,7 +170,7 @@ describe("Excel export", () => {
   it("keeps the fixed headers for an empty survey", () => {
     const workbook = readWorkbook([]);
 
-    expect(workbook.sheetXml).toContain('<dimension ref="A1:L1"/>');
+    expect(workbook.sheetXml).toContain('<dimension ref="A1:M1"/>');
     expect(workbook.sheetXml).not.toContain('<row r="2">');
   });
 

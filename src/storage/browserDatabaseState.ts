@@ -21,10 +21,10 @@ import {
 } from "./recordValidation";
 
 const STORAGE_KEY = "inventera-mera:web:v1";
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 export type BrowserDatabase = {
-  schemaVersion: 6;
+  schemaVersion: 7;
   surveys: Survey[];
   locales: SurveyLocale[];
   observations: Observation[];
@@ -55,7 +55,7 @@ export async function getBrowserDatabase(): Promise<BrowserDatabase> {
     loaded = deleteUnsupportedAmountData(readCurrentDatabase(parsed));
   } catch {
     throw new Error(
-      "Den lokala webbdatan har ett äldre eller ogiltigt format. Exportera en JSON-backup i format 5 med en kompatibel appversion innan du rensar webbplatsdata.",
+      "Den lokala webbdatan har ett äldre eller ogiltigt format. Exportera en JSON-backup i format 5 eller 6 med en kompatibel appversion innan du rensar webbplatsdata.",
     );
   }
   saveBrowserDatabase(loaded);
@@ -88,7 +88,15 @@ function emptyDatabase(): BrowserDatabase {
 
 function readCurrentDatabase(value: unknown): BrowserDatabase {
   if (!isUnknownRecord(value)) throw new Error("Ogiltig databas.");
-  const candidate = value;
+  const candidate = value.schemaVersion === 6
+    ? {
+        ...value,
+        schemaVersion: SCHEMA_VERSION,
+        observations: Array.isArray(value.observations)
+          ? value.observations.map(addDefaultUncertainIdentification)
+          : value.observations,
+      }
+    : value;
   if (
     candidate.schemaVersion !== SCHEMA_VERSION ||
     !Array.isArray(candidate.surveys) ||
@@ -126,6 +134,11 @@ function readCurrentDatabase(value: unknown): BrowserDatabase {
     });
   if (!relationshipsAreValid) throw new Error("Databasens relationer är ogiltiga.");
   return current;
+}
+
+function addDefaultUncertainIdentification(value: unknown): unknown {
+  if (!isUnknownRecord(value) || value.identificationUncertain !== undefined) return value;
+  return { ...value, identificationUncertain: false };
 }
 
 function deleteUnsupportedAmountData(state: BrowserDatabase): BrowserDatabase {

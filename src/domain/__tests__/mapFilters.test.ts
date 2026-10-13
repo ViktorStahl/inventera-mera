@@ -11,6 +11,7 @@ function observation(id: string, localeId: string, species: string, date: string
     localityName: localeId,
     timeOverridden: false,
     positionOverridden: false,
+    identificationUncertain: false,
     position: { wgs84: { latitude: 57, longitude: 12 }, rt90: { northing: 6400000, easting: 1300000, crs: "EPSG:3847" }, source: "manual-rt90" },
     species: { source: "free-text", enteredName: species },
     additionalObservers: [],

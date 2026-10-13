@@ -13,15 +13,38 @@ import {
 registerRepositoryContract("browser", () => freshBrowserRepository().repository);
 
 describe("browser storage", () => {
-  it("initializes an empty store directly at schema v6 and persists it", async () => {
+  it("initializes an empty store directly at schema v7 and persists it", async () => {
     const storage = new MemoryStorage();
     const { repository } = freshBrowserRepository(storage);
 
-    expect((await repository.getDatabase()).schemaVersion).toBe(6);
-    expect(JSON.parse(storage.getItem("inventera-mera:web:v1") ?? "{}").schemaVersion).toBe(6);
+    expect((await repository.getDatabase()).schemaVersion).toBe(7);
+    expect(JSON.parse(storage.getItem("inventera-mera:web:v1") ?? "{}").schemaVersion).toBe(7);
 
     const reloaded = freshBrowserRepository(storage).repository;
-    expect((await reloaded.getDatabase()).schemaVersion).toBe(6);
+    expect((await reloaded.getDatabase()).schemaVersion).toBe(7);
+  });
+
+  it("migrates v6 browser observations to v7 with uncertainty off", async () => {
+    const storage = new MemoryStorage();
+    const initial = freshBrowserRepository(storage).repository;
+    const survey = await initial.createSurvey(freshSurveyDraft());
+    const locale = await initial.createLocale(freshLocaleInput(survey.id));
+    const observation = await initial.createObservation(freshObservationInput(survey.id, locale));
+    const stored = JSON.parse(storage.getItem("inventera-mera:web:v1") ?? "{}") as {
+      schemaVersion: number;
+      observations: Record<string, unknown>[];
+    };
+    stored.schemaVersion = 6;
+    for (const item of stored.observations) delete item.identificationUncertain;
+    storage.setItem("inventera-mera:web:v1", JSON.stringify(stored));
+
+    const migrated = await freshBrowserRepository(storage).repository.getDatabase();
+
+    expect(migrated.schemaVersion).toBe(7);
+    expect(migrated.observations).toMatchObject([
+      { id: observation.id, identificationUncertain: false },
+    ]);
+    expect(JSON.parse(storage.getItem("inventera-mera:web:v1") ?? "{}").schemaVersion).toBe(7);
   });
 
   it("cleans incompatible amounts and drafts from current-schema data", async () => {

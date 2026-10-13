@@ -108,6 +108,7 @@ export function freshObservationInput(
     position: locale.position,
     timeOverridden: false,
     positionOverridden: false,
+    identificationUncertain: false,
     species: { source: "free-text", enteredName: "Ängsvädd" },
     additionalObservers: [],
     ...overrides,

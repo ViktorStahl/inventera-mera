@@ -155,8 +155,8 @@ export async function insertObservation(
       longitude_override, rt90_northing_override, rt90_easting_override,
       accuracy_meters_override, position_source_override, species_json,
       amount_value, amount_unit, public_comment, additional_observers_json,
-      created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      created_at, updated_at, identification_uncertain
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     observation.id,
     observation.localeId,
     observation.timeOverridden ? observation.observedAt : null,
@@ -174,6 +174,7 @@ export async function insertObservation(
     JSON.stringify(observation.additionalObservers),
     observation.createdAt,
     observation.updatedAt,
+    observation.identificationUncertain ? 1 : 0,
   );
 }
 
@@ -187,7 +188,7 @@ export async function updateObservationRow(
       rt90_northing_override = ?, rt90_easting_override = ?,
       accuracy_meters_override = ?, position_source_override = ?, species_json = ?,
       amount_value = ?, amount_unit = ?, public_comment = ?,
-      additional_observers_json = ?, updated_at = ? WHERE id = ?`,
+      additional_observers_json = ?, updated_at = ?, identification_uncertain = ? WHERE id = ?`,
     observation.localeId,
     observation.timeOverridden ? observation.observedAt : null,
     observation.timeOverridden ? observation.timeZone : null,
@@ -203,6 +204,7 @@ export async function updateObservationRow(
     observation.publicComment ?? null,
     JSON.stringify(observation.additionalObservers),
     observation.updatedAt,
+    observation.identificationUncertain ? 1 : 0,
     observation.id,
   );
 }
@@ -284,6 +286,7 @@ export function observationFromRow(row: ObservationRow): Observation {
     ),
     timeOverridden: row.observed_at_override != null,
     positionOverridden: row.position_source_override != null,
+    identificationUncertain: row.identification_uncertain === 1,
     species: JSON.parse(row.species_json) as SpeciesSnapshot,
     amount: amountFromValues(row.amount_value, row.amount_unit),
     publicComment: row.public_comment ?? undefined,
@@ -393,6 +396,7 @@ export type ObservationRow = {
   additional_observers_json: string;
   created_at: string;
   updated_at: string;
+  identification_uncertain: number;
   survey_id: string;
   locale_name: string;
   effective_observed_at: string;

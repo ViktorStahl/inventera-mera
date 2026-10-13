@@ -11,6 +11,7 @@ export function newObservationDraft(
     date: usesLocaleTime ? localDateFromIso(locale.observedAt) : todayLocal(now),
     time: usesLocaleTime ? localTimeFromIso(locale.observedAt) : timeLocal(now),
     timeOverridden: !usesLocaleTime,
+    identificationUncertain: false,
     northing: usesLocalePosition ? locale.position.rt90.northing.toString() : "",
     easting: usesLocalePosition ? locale.position.rt90.easting.toString() : "",
     accuracyMeters:

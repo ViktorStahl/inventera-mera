@@ -24,6 +24,7 @@ export function observationToDraft(observation: Observation): ObservationDraft {
     date: localDateFromIso(observation.observedAt),
     time: localTimeFromIso(observation.observedAt),
     timeOverridden: observation.timeOverridden,
+    identificationUncertain: observation.identificationUncertain,
     northing: observation.position.rt90.northing.toString(),
     easting: observation.position.rt90.easting.toString(),
     accuracyMeters: observation.position.accuracyMeters?.toString() ?? "",
@@ -78,6 +79,7 @@ export function buildObservationInput(
     timeZone: draft.timeOverridden ? currentTimeZone() : locale.timeZone,
     localityName: locale.name,
     timeOverridden: draft.timeOverridden,
+    identificationUncertain: draft.identificationUncertain,
     position: {
       wgs84,
       rt90: { ...rt90, crs: "EPSG:3847" },

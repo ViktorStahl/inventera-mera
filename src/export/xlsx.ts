@@ -20,6 +20,7 @@ export const ARTPORTALEN_HEADERS = [
   "Biotop-beskrivning",
   "Publik kommentar",
   "Med-observatör",
+  "Osäker artbestämning",
 ] as const;
 
 export const EXCEL_ACCURACY_METERS = [
@@ -72,6 +73,7 @@ export function createSurveyWorkbook(
         safeOptionalStringCell(locale?.note),
         safeOptionalStringCell(observation.publicComment),
         safeOptionalStringCell(observation.additionalObservers.join("; ")),
+        observation.identificationUncertain ? stringCell("X") : blankCell(),
       ];
     }),
   ];
@@ -153,7 +155,7 @@ function collectSharedStrings(rows: Cell[][]): {
 }
 
 function worksheetXml(rows: Cell[][], sharedStringIndexes: Map<string, number>): string {
-  const lastCell = `L${Math.max(1, rows.length)}`;
+  const lastCell = `${columnName(rows[0]?.length ?? 1)}${Math.max(1, rows.length)}`;
   const sheetData = rows
     .map((row, rowIndex) => {
       const cells = row

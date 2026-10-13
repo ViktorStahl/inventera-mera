@@ -60,6 +60,7 @@ export function isObservationBeforeAmountCleanup(value: unknown): boolean {
     isPosition(value.position) &&
     typeof value.timeOverridden === "boolean" &&
     typeof value.positionOverridden === "boolean" &&
+    typeof value.identificationUncertain === "boolean" &&
     isSpeciesSnapshot(value.species) &&
     isOptionalString(value.publicComment) &&
     isStringArray(value.additionalObservers) &&

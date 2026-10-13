@@ -20,6 +20,7 @@ const observation: Observation = {
   localityName: "Lillåsen & bäcken",
   timeOverridden: true,
   positionOverridden: true,
+  identificationUncertain: false,
   position: {
     wgs84: { latitude: 57.7, longitude: 11.9 },
     rt90: { northing: 6400000, easting: 1300000, crs: "EPSG:3847" },

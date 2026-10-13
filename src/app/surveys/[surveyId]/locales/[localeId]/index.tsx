@@ -100,13 +100,16 @@ export default function LocaleDetailScreen() {
                   pathname: "/surveys/[surveyId]/observations/[observationId]",
                   params: { surveyId, observationId: observation.id },
                 })}
-                accessibilityLabel={`${survey.status === "active" ? "Redigera" : "Visa"} ${observation.species.preferredName ?? observation.species.enteredName}`}
+                accessibilityLabel={`${survey.status === "active" ? "Redigera" : "Visa"} ${observation.species.preferredName ?? observation.species.enteredName}${observation.identificationUncertain ? ", osäker artbestämning" : ""}`}
               >
                 <View style={styles.observationRow}>
                   <Text style={styles.time}>{localTimeFromIso(observation.observedAt)}</Text>
                   <View style={styles.observationBody}>
                     <Text style={styles.species}>{observation.species.preferredName ?? observation.species.enteredName}</Text>
                     {observation.species.scientificName ? <Text style={styles.scientific}>{observation.species.scientificName}</Text> : <Text style={styles.freeText}>Fritext</Text>}
+                    {observation.identificationUncertain ? (
+                      <Text style={styles.uncertainty}>Osäker</Text>
+                    ) : null}
                     {deviation ? (
                       <Text style={styles.override}>Avviker från lokalens {deviation}</Text>
                     ) : null}
@@ -149,6 +152,7 @@ const styles = StyleSheet.create({
   species: { color: colors.text, fontWeight: "700", fontSize: 16 },
   scientific: { color: colors.textMuted, fontStyle: "italic", marginTop: 2 },
   freeText: { color: colors.green800, fontSize: 12, marginTop: 2 },
+  uncertainty: { color: colors.warning, fontSize: 12, fontWeight: "700", marginTop: spacing.xs },
   override: { color: colors.warning, fontSize: 12, marginTop: spacing.xs },
   amount: { color: colors.text, maxWidth: 90 },
   chevron: { color: colors.textMuted, fontSize: 28 },

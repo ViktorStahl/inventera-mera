@@ -27,12 +27,12 @@ registerRepositoryContract("native SQLite", async () => {
 });
 
 describe("native SQLite startup", () => {
-  it("initializes the current schema directly and reopens v6 data", async () => {
+  it("initializes the current schema directly and reopens v7 data", async () => {
     const { repository, database } = freshNativeRepository();
     await repository.getDatabase();
 
     expect(await database.getFirstAsync<{ user_version: number }>("PRAGMA user_version"))
-      .toEqual({ user_version: 6 });
+      .toEqual({ user_version: 7 });
     const expectedColumns: Record<string, string[]> = {
       surveys: [
         "id", "title", "description", "taxonomy_json", "survey_date", "status",
@@ -49,6 +49,7 @@ describe("native SQLite startup", () => {
         "longitude_override", "rt90_northing_override", "rt90_easting_override",
         "accuracy_meters_override", "position_source_override", "species_json", "amount_value",
         "amount_unit", "public_comment", "additional_observers_json", "created_at", "updated_at",
+        "identification_uncertain",
       ],
       species_lists: ["id", "name", "taxonomy_json", "created_at", "updated_at"],
       species_list_entries: [
@@ -74,6 +75,28 @@ describe("native SQLite startup", () => {
     const reopened = freshNativeRepository(database).repository;
     await reopened.getDatabase();
     expect(await reopened.getSurvey(survey.id)).toMatchObject({ title: "Beständig inventering" });
+  });
+
+  it("migrates v6 observations to v7 with uncertainty off", async () => {
+    const { repository, database } = freshNativeRepository();
+    await repository.getDatabase();
+    const survey = await repository.createSurvey(freshSurveyDraft());
+    const locale = await repository.createLocale(freshLocaleInput(survey.id));
+    const observation = await repository.createObservation(
+      freshObservationInput(survey.id, locale),
+    );
+
+    await database.execAsync(
+      "ALTER TABLE observations DROP COLUMN identification_uncertain; PRAGMA user_version = 6;",
+    );
+
+    const reopened = freshNativeRepository(database).repository;
+    await reopened.getDatabase();
+
+    expect(await database.getFirstAsync<{ user_version: number }>("PRAGMA user_version"))
+      .toEqual({ user_version: 7 });
+    expect(await reopened.getObservation(survey.id, observation.id))
+      .toMatchObject({ identificationUncertain: false });
   });
 
   it("cleans unsupported amounts and drafts when opening current-schema data", async () => {
@@ -113,7 +136,7 @@ describe("native SQLite startup", () => {
 
   it("continues to reject databases created by a newer app version", async () => {
     const database = new SqliteTestAdapter();
-    await database.execAsync("PRAGMA user_version = 7;");
+    await database.execAsync("PRAGMA user_version = 8;");
     const { repository } = freshNativeRepository(database);
 
     await expect(repository.getDatabase()).rejects.toThrow("nyare version");

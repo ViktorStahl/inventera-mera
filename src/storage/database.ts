@@ -38,7 +38,7 @@ import {
   localeEditDraftKey,
   localeEditDraftPrefix,
   normalizeSpeciesForList,
-  parseSurveyBackupV5,
+  parseSurveyBackup,
   observationDraftKey,
   observationDraftPrefix,
   observationEditDraftKey,
@@ -93,7 +93,7 @@ export {
 } from "./repositoryPolicy";
 
 const DATABASE_NAME = "inventera-mera.db";
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 const TAXONOMY_DATABASE_NAME = `dyntaxa-vascular-plants-${taxonomyManifest.version}-v${taxonomyManifest.formatVersion}.db`;
 const TAXONOMY_DATABASE_ASSET = require(
   "../../assets/taxonomies/dyntaxa-vascular-plants.db",
@@ -126,6 +126,8 @@ async function openAndInitialize(): Promise<SQLite.SQLiteDatabase> {
     );
     if (existingTable) throw unsupportedDatabaseVersion();
     initializeFreshDatabase = true;
+  } else if (version === 6) {
+    await migrateSchema6To7(database);
   } else if (version < SCHEMA_VERSION) {
     throw unsupportedDatabaseVersion();
   }
@@ -135,9 +137,19 @@ async function openAndInitialize(): Promise<SQLite.SQLiteDatabase> {
   return database;
 }
 
+async function migrateSchema6To7(database: SQLite.SQLiteDatabase): Promise<void> {
+  await database.withTransactionAsync(async () => {
+    await database.execAsync(`
+      ALTER TABLE observations ADD COLUMN identification_uncertain INTEGER NOT NULL
+        DEFAULT 0 CHECK(identification_uncertain IN (0, 1));
+      PRAGMA user_version = 7;
+    `);
+  });
+}
+
 function unsupportedDatabaseVersion(): Error {
   return new Error(
-    "Den lokala databasen har ett äldre format som inte stöds. Exportera en JSON-backup i format 5 med en kompatibel appversion, återställ appdata och importera sedan backupen.",
+    "Den lokala databasen har ett äldre format som inte stöds. Exportera en JSON-backup i format 5 eller 6 med en kompatibel appversion, återställ appdata och importera sedan backupen.",
   );
 }
 
@@ -222,6 +234,8 @@ async function createCurrentSchema(database: SQLite.SQLiteDatabase): Promise<voi
         additional_observers_json TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
+        identification_uncertain INTEGER NOT NULL DEFAULT 0
+          CHECK(identification_uncertain IN (0, 1)),
         CHECK (
           (observed_at_override IS NULL AND time_zone_override IS NULL) OR
           (observed_at_override IS NOT NULL AND time_zone_override IS NOT NULL)
@@ -1112,7 +1126,7 @@ export async function buildSurveyBackup(surveyId: string): Promise<SurveyBackup>
     : null;
   return {
     format: "inventera-mera-backup",
-    formatVersion: 5,
+    formatVersion: 6,
     exportedAt: new Date().toISOString(),
     survey,
     locales: (await listLocales(surveyId)).map(({ observationCount: _, ...locale }) => locale),
@@ -1124,7 +1138,7 @@ export async function buildSurveyBackup(surveyId: string): Promise<SurveyBackup>
 }
 
 export async function restoreSurveyBackup(value: unknown): Promise<string> {
-  const backup = parseSurveyBackupV5(value);
+  const backup = parseSurveyBackup(value);
   const database = await getDatabase();
   const existingSpeciesList = backup.speciesList
     ? await getSpeciesList(backup.speciesList.list.id)

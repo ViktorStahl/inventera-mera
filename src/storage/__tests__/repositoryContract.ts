@@ -54,7 +54,7 @@ export function registerRepositoryContract(
       });
     });
 
-    it("adds a free-text observation to its survey list and round-trips a v5 backup", async () => {
+    it("round-trips v6 uncertainty and defaults missing v5 values to false", async () => {
       const repository = await createRepository();
       const speciesList = await repository.createSpeciesList(
         "Fältlista",
@@ -71,13 +71,14 @@ export function registerRepositoryContract(
       const observation = await repository.createObservation(
         freshObservationInput(survey.id, locale, {
           species: { source: "free-text", enteredName: "Okänd fältväxt" },
+          identificationUncertain: true,
         }),
         speciesList.id,
       );
 
       expect(await repository.speciesListContains(speciesList.id, observation.species)).toBe(true);
       const backup = await repository.buildSurveyBackup(survey.id);
-      expect(backup.formatVersion).toBe(5);
+      expect(backup.formatVersion).toBe(6);
       expect(await repository.restoreSurveyBackup(backup)).toBe(survey.id);
       expect(await repository.listLocales(survey.id)).toEqual([
         expect.objectContaining({
@@ -86,7 +87,21 @@ export function registerRepositoryContract(
         }),
       ]);
       expect(await repository.listObservations(survey.id)).toMatchObject([
-        { id: observation.id, species: { enteredName: "Okänd fältväxt" } },
+        {
+          id: observation.id,
+          species: { enteredName: "Okänd fältväxt" },
+          identificationUncertain: true,
+        },
+      ]);
+
+      const legacyBackup = {
+        ...backup,
+        formatVersion: 5,
+        observations: backup.observations.map(({ identificationUncertain: _, ...item }) => item),
+      };
+      await repository.restoreSurveyBackup(legacyBackup);
+      expect(await repository.listObservations(survey.id)).toMatchObject([
+        { id: observation.id, identificationUncertain: false },
       ]);
       expect(await repository.getSurvey(survey.id)).toMatchObject({
         speciesListId: speciesList.id,
@@ -126,11 +141,13 @@ export function registerRepositoryContract(
       const updated = await repository.updateObservation(
         observation.id,
         freshObservationInput(survey.id, locale, {
+          identificationUncertain: true,
           species: { source: "free-text", enteredName: "Klockljung" },
           amount: { value: 4, unit: "plantor/tuvor" },
         }),
       );
       expect(updated).toMatchObject({
+        identificationUncertain: true,
         species: { enteredName: "Klockljung" },
         amount: { value: 4, unit: "plantor/tuvor" },
       });

@@ -1,6 +1,10 @@
 import { VASCULAR_PLANTS_TAXONOMY } from "@/data/taxonomies";
 import type { ObservationDraft, Survey, SurveyLocale, Taxon } from "@/domain/models";
-import { buildObservationInput, speciesSnapshotForSelection } from "../observationFormData";
+import {
+  buildObservationInput,
+  observationToDraft,
+  speciesSnapshotForSelection,
+} from "../observationFormData";
 
 const survey: Survey = {
   id: "survey-1",
@@ -34,6 +38,7 @@ function draft(): ObservationDraft {
     date: "2026-10-12",
     time: "09:00",
     timeOverridden: false,
+    identificationUncertain: false,
     northing: "6400000",
     easting: "1300000",
     accuracyMeters: "4,5",
@@ -57,12 +62,37 @@ describe("observation form data", () => {
       localeId: locale.id,
       localityName: locale.name,
       timeZone: locale.timeZone,
+      identificationUncertain: false,
       species: { source: "free-text", enteredName: "Okänd ört" },
       amount: { value: 2.5, unit: "m2" },
       publicComment: "Kommentar",
       additionalObservers: ["Anna", "Bo"],
       position: { rt90: { northing: 6_400_000, easting: 1_300_000 }, accuracyMeters: 4.5 },
     });
+  });
+
+  it("preserves uncertainty while editing and building observation input", () => {
+    const original = {
+      id: "observation-1",
+      surveyId: survey.id,
+      localeId: locale.id,
+      observedAt: locale.observedAt,
+      timeZone: locale.timeZone,
+      localityName: locale.name,
+      timeOverridden: false,
+      positionOverridden: false,
+      identificationUncertain: true,
+      position: locale.position,
+      species: { source: "free-text" as const, enteredName: "Okänd ört" },
+      additionalObservers: [],
+      createdAt: locale.createdAt,
+      updatedAt: locale.updatedAt,
+    };
+
+    const editingDraft = observationToDraft(original);
+    expect(editingDraft.identificationUncertain).toBe(true);
+    expect(buildObservationInput(survey, locale, editingDraft, original).identificationUncertain)
+      .toBe(true);
   });
 
   it("stores the selected taxonomy identity and the entered-name snapshot", () => {

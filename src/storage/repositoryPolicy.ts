@@ -165,12 +165,12 @@ export function taxonomyReference(taxonomy: TaxonomyReference): TaxonomyReferenc
   };
 }
 
-export function parseSurveyBackupV5(value: unknown): SurveyBackup {
+export function parseSurveyBackup(value: unknown): SurveyBackup {
   if (!value || typeof value !== "object") throw new Error("Filen är inte en giltig backup.");
   const backup = value as Record<string, unknown>;
   if (
     backup.format !== "inventera-mera-backup" ||
-    backup.formatVersion !== 5 ||
+    (backup.formatVersion !== 5 && backup.formatVersion !== 6) ||
     typeof backup.exportedAt !== "string" ||
     !Array.isArray(backup.locales) ||
     !Array.isArray(backup.observations)
@@ -185,7 +185,8 @@ export function parseSurveyBackupV5(value: unknown): SurveyBackup {
     throw new Error("Backupen innehåller en ogiltig lokal.");
   }
   const observations: Observation[] = [];
-  for (const observation of backup.observations) {
+  for (const rawObservation of backup.observations) {
+    const observation = normalizeBackupObservation(rawObservation, backup.formatVersion);
     if (
       isObservationBeforeAmountCleanup(observation) &&
       isUnknownRecord(observation) &&
@@ -211,6 +212,7 @@ export function parseSurveyBackupV5(value: unknown): SurveyBackup {
   }
   const normalized = {
     ...backup,
+    formatVersion: 6,
     survey,
     locales: backup.locales,
     observations,
@@ -252,4 +254,13 @@ export function parseSurveyBackupV5(value: unknown): SurveyBackup {
     }
   }
   return normalized;
+}
+
+function normalizeBackupObservation(value: unknown, formatVersion: unknown): unknown {
+  if (
+    formatVersion !== 5 ||
+    !isUnknownRecord(value) ||
+    value.identificationUncertain !== undefined
+  ) return value;
+  return { ...value, identificationUncertain: false };
 }

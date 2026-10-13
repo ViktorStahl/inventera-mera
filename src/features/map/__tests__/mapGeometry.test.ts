@@ -21,6 +21,7 @@ function observation(id: string, latitude: number, longitude: number): Observati
     },
     timeOverridden: false,
     positionOverridden: false,
+    identificationUncertain: false,
     species: { source: "free-text", enteredName: id },
     additionalObservers: [],
     createdAt: "2026-08-15T07:00:00.000Z",

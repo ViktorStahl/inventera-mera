@@ -30,6 +30,7 @@ import {
 } from "@/features/location/devicePosition";
 import { SpeciesPicker } from "@/features/taxonomy/SpeciesPicker";
 import { AmountUnitPicker } from "./AmountUnitPicker";
+import { IdentificationUncertainSwitch } from "./IdentificationUncertainSwitch";
 import {
   newObservationDraft,
   shouldAutomaticallyCapturePosition,
@@ -183,6 +184,7 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
       const nextDraft = stored ? {
         ...baseDraft,
         ...stored,
+        identificationUncertain: stored.identificationUncertain ?? false,
         addToSpeciesList: stored.addToSpeciesList ?? false,
       } : baseDraft;
       setDraft(nextDraft);
@@ -411,6 +413,10 @@ export function ObservationFormScreen({ editing = false }: { editing?: boolean }
         onQueryChange={updateSpeciesQuery}
         onSelect={selectSpecies}
         error={errors.speciesQuery}
+      />
+      <IdentificationUncertainSwitch
+        value={draft.identificationUncertain}
+        onValueChange={(value) => update("identificationUncertain", value)}
       />
       {speciesList && draft.speciesQuery.trim() ? (
         speciesAlreadyInList ? (
